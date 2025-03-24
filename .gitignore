@@ -1,0 +1,72 @@
+# Leiningen
+target/
+classes/
+checkouts/
+.lein-deps-sum
+.lein-repl-history
+.lein-plugins/
+.lein-failures
+.nrepl-port
+.nrepl-history
+.cpcache/
+.clj-kondo/.cache/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Visual Studio Code
+.vscode/
+.calva/
+.clj-kondo/
+.lsp/
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Mac OSX
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# Project specific
+.env
+resources/log/
+ollama-models/
+
+# Node.js (if used with ClojureScript)
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+yarn.lock
+
+# Compiled JS (if using ClojureScript)
+resources/public/js/compiled/
+out/
+.shadow-cljs/
+
+# Doc-specific temp files
+*.bak
+*.tmp
