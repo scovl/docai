@@ -3,24 +3,27 @@
             [hickory.core :as html]
             [clojure.string :as str]))
 
-(defn is-string? [x]
-  (instance? String x))
-
-(defn extract-text-from-markdown [content]
+(defn extract-text-from-markdown
+  "Extrai texto de conteúdo Markdown"
+  [content]
   (try
-    (let [hiccup-result (md/md->hiccup content)
-          text-nodes (filter is-string? (flatten hiccup-result))]
-      text-nodes)
+    (->> content
+         md/md->hiccup
+         flatten
+         (filter string?))
     (catch Exception e
       (println "Erro ao processar Markdown:" (.getMessage e))
       [content])))
 
-(defn extract-text-from-html [content]
+(defn extract-text-from-html
+  "Extrai texto de conteúdo HTML"
+  [content]
   (try
-    (let [dom (html/parse content)
-          hiccup-result (html/as-hiccup dom)
-          text-nodes (filter is-string? (flatten hiccup-result))]
-      text-nodes)
+    (->> content
+         html/parse
+         html/as-hiccup
+         flatten
+         (filter string?))
     (catch Exception e
       (println "Erro ao processar HTML:" (.getMessage e))
       [content])))
@@ -41,12 +44,12 @@
     chunks))
 
 (defn preprocess-chunks
-  "Limpa e prepara os chunks de texto"
+  "Limpa e prepara os chunks de texto para processamento"
   [chunks]
-  (let [processed (map #(-> %
-                            (str/join " ")
-                            (str/replace #"\s+" " ")
-                            (str/trim))
-                       chunks)]
-    (println "Primeiro chunk processado:" (first processed))
-    processed)) 
+  (->> chunks
+       (map (fn [chunk] 
+              (-> chunk
+                  (str/join " ")
+                  (str/replace #"\s+" " ")
+                  str/trim)))
+       (filter (complement str/blank?)))) 
