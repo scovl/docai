@@ -12,8 +12,13 @@
                  [org.clojure/tools.namespace "1.4.4"]  ; Para reloading
                  [org.clojure/core.async "1.6.681"]  ; Para operações assíncronas
                  [org.clojure/core.memoize "1.0.257"]  ; Para cache
-                 [org.clojure/core.cache "1.0.225"]]  ; Para cache
+                 [org.clojure/core.cache "1.0.225"]  ; Para cache
+                 [com.github.seancorfield/next.jdbc "1.3.1002"]  ; Para PostgreSQL
+                 [org.postgresql/postgresql "42.7.2"]  ; Driver PostgreSQL
+                 [camel-snake-kebab "0.4.3"]]  ; Para compatibilidade com next.jdbc
   :main ^:skip-aot docai.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
-                       :jvm-opts ["-Dclojure.compiler.direct-linking=true"]}})
+                       :jvm-opts ["-Dclojure.compiler.direct-linking=true"]}
+             :dev {:plugins [[lein-cljfmt "0.9.0"]  ; Para formatação de código
+                            [lein-kibit "0.1.8"]]}})  ; Para revisão estática
