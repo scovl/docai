@@ -1,7 +1,6 @@
 (ns docai.document-test
   (:require [clojure.test :refer [deftest testing is]]
-            [docai.document :as doc]
-            [clojure.string :as str]))
+            [docai.document :as doc]))
 
 (def sample-markdown
   "# Título Principal\n\n## Subtítulo\n\nEste é um texto de exemplo em markdown.\n\n```clojure\n(+ 1 2)\n```\n\nMais texto aqui.")
