@@ -1,0 +1,56 @@
+# Este arquivo pode ser usado com Docker ou Podman
+# 
+# Para usar com Docker:
+#    docker compose up -d
+#
+# Para usar com Podman:
+#    podman-compose up -d  (Linux)
+#    podman compose up -d  (Windows/macOS com Podman Desktop)
+#
+# Observação: O Podman pode exigir ajustes adicionais de permissões 
+# ou configurações dependendo do sistema operacional.
+
+name: pgai
+services:
+  db:
+    image: timescale/timescaledb-ha:pg17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      # Definir variáveis de ambiente para o host do Ollama
+      OLLAMA_HOST: http://ollama:11434
+    ports:
+      - "5432:5432"
+    volumes:
+      - data:/home/postgres/pgdata/data
+    # Não use a extensão ai até garantir que está instalada corretamente
+    command: "-c search_path=public"
+    depends_on:
+      - ollama
+    # Adicionar links explícitos para o serviço Ollama
+    links:
+      - ollama
+
+  vectorizer-worker:
+    image: timescale/pgai-vectorizer-worker:latest
+    environment:
+      PGAI_VECTORIZER_WORKER_DB_URL: postgres://postgres:postgres@db:5432/postgres
+      OLLAMA_HOST: http://ollama:11434
+    command: [ "--poll-interval", "5s", "--log-level", "DEBUG" ]
+    depends_on:
+      - db
+      - ollama
+    links:
+      - ollama
+
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Comando direto para iniciar o Ollama
+    command: serve
+
+volumes:
+  data:
+  ollama_data: 
