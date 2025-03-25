@@ -20,7 +20,7 @@ DocAI é uma aplicação Clojure que implementa um sistema RAG (Retrieval-Augmen
 
 1. Clone o repositório:
 ```bash
-git clone https://github.com/seu-usuario/docai.git
+git clone https://github.com/scovl/docai.git
 cd docai
 ```
 
@@ -76,25 +76,6 @@ Seguimos boas práticas de teste em Clojure:
 - Uso de aliases para namespaces
 - Asserções precisas para comportamentos esperados
 
-## Estrutura do Projeto
-
-```
-docai/
-├── src/
-│   └── docai/
-│       ├── document.clj  ; Processamento de documentação
-│       ├── embedding.clj ; Geração de embeddings usando TF-IDF
-│       ├── llm.clj       ; Interface com o Ollama/LLM
-│       └── core.clj      ; Lógica principal
-├── test/
-│   └── docai/
-│       └── core_test.clj ; Testes unitários
-├── resources/
-│   └── docs/            ; Documentação para consulta
-├── project.clj          ; Configuração do projeto
-├── .gitignore           ; Padrões de arquivos a ignorar
-└── README.md           ; Este arquivo
-```
 
 ## Configuração de Desenvolvimento
 
@@ -119,13 +100,3 @@ Contribuições são bem-vindas! Por favor, sinta-se à vontade para:
 ## Licença
 
 Este projeto está licenciado sob a licença EPL-2.0 - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## Referências
-
-- [RAG](https://www.pinecone.io/learn/rag/)
-- [Embedding](https://www.pinecone.io/learn/embeddings/)
-- [LLM](https://www.pinecone.io/learn/llms/)
-- [Ollama](https://ollama.com/)
-- [Clojure](https://clojure.org/)
-- [clojure.test](https://clojure.github.io/clojure/clojure.test-api.html)
-- [clj-kondo](https://github.com/clj-kondo/clj-kondo)
