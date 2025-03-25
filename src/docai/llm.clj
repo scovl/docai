@@ -2,11 +2,18 @@
   (:require [clojure.data.json :as json]
             [org.httpkit.client :as http]))
 
-(def ollama-url "http://localhost:11434/api/generate")
-(def model-name "deepseek-r1") ; Alterado de llama3 para deepseek-r1
+(def ^:private ollama-url "http://localhost:11434/api/generate")
+(def ^:private model-name "deepseek-r1")
+
+(defn- api-error-message
+  "Formata mensagem de erro da API"
+  [response]
+  (str "Erro ao chamar a API do Ollama: " 
+       (:status response) " - " 
+       (:body response)))
 
 (defn call-ollama-api
-  "Chama a API do Ollama para gerar uma resposta"
+  "Chama a API do Ollama para gerar uma resposta baseada no prompt fornecido"
   [prompt]
   (let [request-body {:model model-name
                       :prompt prompt
@@ -19,7 +26,7 @@
           :body
           (json/read-str :key-fn keyword)
           :response)
-      (str "Erro ao chamar a API do Ollama: " (:status response) " - " (:body response)))))
+      (api-error-message response))))
 
 ;; Funções de utilidade para uso futuro:
 ;;
@@ -32,7 +39,7 @@
 ;;   (extract-summary "# Título\nConteúdo longo..." 50) => "Conteúdo longo..."
 
 (defn format-prompt
-  "Formata o prompt para o LLM"
+  "Formata o prompt para o LLM com o contexto e a consulta do usuário"
   [context query]
   (str "Você é um assistente especializado em documentação técnica. Com base no seguinte contexto da documentação:\n\n"
        context
@@ -42,7 +49,7 @@
        "indique isso claramente e forneça uma resposta geral com base em seu conhecimento."))
 
 (defn generate-response
-  "Gera resposta usando o LLM com base no contexto"
+  "Gera resposta usando o LLM com base no contexto e na consulta do usuário"
   [query context]
   (try
     (let [prompt (format-prompt context query)]
