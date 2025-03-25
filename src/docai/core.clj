@@ -6,54 +6,58 @@
             [clojure.string :as str])
   (:gen-class))
 
-(def docs-path "resources/docs")
+(def ^:private docs-path "resources/docs")
 
-(defn load-documentation
-  "Carrega todos os arquivos de documentação do diretório"
+(defn- load-documentation
+  "Carrega todos os arquivos de documentação do diretório configurado"
   []
   (->> (file-seq (io/file docs-path))
        (filter #(.isFile %))
        (map #(.getPath %))))
 
-(defn setup-knowledge-base
-  "Configura a base de conhecimento inicial"
-  []
-  (let [doc-files (load-documentation)
-        _ (when (empty? doc-files)
-            (println "Aviso: Nenhum arquivo de documentação encontrado em resources/docs/"))
-        _ (doseq [file doc-files]
-            (println "Arquivo encontrado:" file))
-        all-chunks (mapcat doc/extract-text doc-files)
-        processed-chunks (doc/preprocess-chunks all-chunks)
-        _ (println (str "Processando " (count processed-chunks) " chunks de texto..."))
-        _ (when (< (count processed-chunks) 5)
-            (println "DEBUG - Primeiros chunks:")
-            (doseq [chunk (take 5 processed-chunks)]
-              (println (str "Chunk: '" (subs chunk 0 (min 50 (count chunk))) "...'"))))
-        embeddings (emb/create-embeddings processed-chunks)]
-    {:chunks processed-chunks
-     :embeddings embeddings
-     :original-files doc-files}))
-
-(defn get-file-content
-  "Lê o conteúdo completo de um arquivo"
+(defn- get-file-content
+  "Lê o conteúdo completo de um arquivo, retornando string vazia em caso de erro"
   [file-path]
   (try
     (slurp file-path)
-    (catch Exception _
-      (println "Erro ao ler arquivo:" file-path)
+    (catch Exception e
+      (println "Erro ao ler arquivo:" file-path (.getMessage e))
       "")))
 
+(defn setup-knowledge-base
+  "Configura a base de conhecimento inicial extraindo e processando textos dos arquivos de documentação"
+  []
+  (let [doc-files (load-documentation)]
+    (if (empty? doc-files)
+      (println "Aviso: Nenhum arquivo de documentação encontrado em" docs-path)
+      (doseq [file doc-files]
+        (println "Arquivo encontrado:" file)))
+    
+    (let [all-chunks (mapcat doc/extract-text doc-files)
+          processed-chunks (doc/preprocess-chunks all-chunks)]
+      (println (str "Processando " (count processed-chunks) " chunks de texto..."))
+      
+      (when (and (seq processed-chunks) (< (count processed-chunks) 5))
+        (println "DEBUG - Primeiros chunks:")
+        (doseq [chunk (take 5 processed-chunks)]
+          (println (str "Chunk: '" (subs chunk 0 (min 50 (count chunk))) "...'"))))
+      
+      (let [embeddings (emb/create-embeddings processed-chunks)]
+        {:chunks processed-chunks
+         :embeddings embeddings
+         :original-files doc-files}))))
+
 (defn query-rag
-  "Processa uma query usando o pipeline RAG"
+  "Processa uma consulta usando o pipeline RAG (Retrieval Augmented Generation)
+   Recupera contexto relevante da base de conhecimento e gera uma resposta usando LLM"
   [knowledge-base query]
   (println "DEBUG - Processando query:" query)
   (if (and (seq (:chunks knowledge-base)) 
            (seq (:embeddings knowledge-base)))
     (let [query-emb (first (emb/create-embeddings [query]))
           similar-idxs (emb/similarity-search query-emb 
-                                            (:embeddings knowledge-base)
-                                            3)
+                                           (:embeddings knowledge-base)
+                                           3)
           _ (println "DEBUG - Índices similares:" similar-idxs)
           
           ;; Obter contexto relevante
@@ -69,32 +73,36 @@
                     context-chunks)]
       
       (println "DEBUG - Tamanho do contexto:" (count context) "caracteres")
-      (println "DEBUG - Amostra do contexto:" (subs context 0 (min 200 (count context))) "...")
+      (when (> (count context) 0)
+        (println "DEBUG - Amostra do contexto:" 
+                 (subs context 0 (min 200 (count context))) "..."))
       
       ;; Gerar resposta usando o LLM
       (llm/generate-response query context))
     "Não foi possível encontrar informações relevantes na base de conhecimento."))
 
 (defn -main
-  "Função principal que inicializa a aplicação DocAI"
+  "Função principal que inicializa a aplicação DocAI e processa consultas do usuário"
   [& _]
-  (println "🚀 Inicializando DocAI...")
+  (println "Inicializando DocAI...")
   
   ;; Verificar se o Ollama está acessível
   (println "ℹ️ Para usar o Ollama, certifique-se de que ele está em execução com o comando: ollama serve")
   (println "ℹ️ Usando o modelo deepseek-r1. Se você ainda não o baixou, execute: ollama pull deepseek-r1")
   
   (let [kb (setup-knowledge-base)]
-    (println "✨ Base de conhecimento pronta! Faça sua pergunta:")
+    (println "Base de conhecimento pronta! Faça sua pergunta:")
     (try
       (loop []
         (when-let [input (read-line)]
-          (when-not (= input "sair")
-            (println "🤔 Processando...")
-            (println (query-rag kb input))
-            (println "\n❓ Próxima pergunta (ou 'sair' para terminar):")
-            (recur))))
+          (if (= input "sair")
+            (println "Obrigado por usar o DocAI. Até a próxima!")
+            (do
+              (println "Processando...")
+              (println (query-rag kb input))
+              (println "\nPróxima pergunta (ou 'sair' para terminar):")
+              (recur)))))
       (catch Exception e
-        (println "❌ Erro: " (.getMessage e))
-        (println "Detalhes: " (ex-data e))))
-    (println "👋 Obrigado por usar o DocAI. Até a próxima!")))
+        (println "Erro: " (.getMessage e))
+        (println "Detalhes: " (ex-data e))
+        (println "Obrigado por usar o DocAI. Até a próxima!")))))
