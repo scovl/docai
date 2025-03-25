@@ -1,102 +1,260 @@
 # DocAI - Assistente RAG para Documentação Técnica
 
-DocAI é uma aplicação Clojure que implementa um sistema RAG (Retrieval-Augmented Generation) para consulta de documentação técnica. Ele permite que você faça perguntas sobre documentação e receba respostas precisas baseadas no conteúdo dos documentos.
+Um aplicativo Clojure que implementa um sistema RAG (Retrieval Augmented Generation) para consulta de documentação técnica. O DocAI permite buscar informações em documentos técnicos e receber respostas contextualmente relevantes.
 
-## Funcionalidades
+## Características
 
-- Processamento de documentação em Markdown e HTML
-- Geração de embeddings utilizando algoritmo TF-IDF simples
-- Busca semântica por similaridade
-- Geração de respostas usando o modelo DeepSeek-R1 através do Ollama
-- Interface de linha de comando interativa
+- Suporte a documentos em formato Markdown e HTML
+- Duas implementações de RAG:
+  1. **TF-IDF em memória**: Processamento leve sem dependências externas
+  2. **PostgreSQL com pgvector**: Busca semântica escalável usando embeddings densos via pgai
+- Geração de respostas usando Ollama (modelo deepseek-r1)
+- Processamento de chunking automático de documentos
+- Integração com PostgreSQL, pgvector e pgai para busca semântica robusta
 
-## Requisitos
+## Pré-requisitos
 
-- Clojure 1.11.1 ou superior
-- Leiningen 2.0.0 ou superior
-- [Ollama](https://ollama.com/) para execução local de modelos LLM
+- [Leiningen](https://leiningen.org/) 2.9.0 ou superior
+- [Ollama](https://ollama.com/) (para geração de respostas e embeddings)
+- [Docker](https://www.docker.com/) ou [Podman](https://podman.io/) (para o modo PostgreSQL)
+
+## Dependências principais
+
+- **Clojure**: 1.11.1
+- **markdown-to-hiccup** e **hickory**: Para processamento de documentos Markdown e HTML
+- **next.jdbc**: 1.3.1002 para integração com PostgreSQL
+- **PostgreSQL**: 42.7.2 (driver JDBC)
+- **Ollama**: Para execução de modelos de linguagem e geração de embeddings
 
 ## Instalação
 
 1. Clone o repositório:
-```bash
-git clone https://github.com/scovl/docai.git
-cd docai
-```
+   ```
+   git clone https://github.com/scovl/docai.git
+   cd docai
+   ```
 
-2. Instale o Ollama seguindo as instruções em [ollama.com](https://ollama.com)
+2. Configure o ambiente usando o script de execução:
+   ```
+   # No Linux (usando Podman)
+   chmod +x run.sh
+   ./run.sh setup
 
-3. Baixe o modelo DeepSeek R1:
-```bash
-ollama pull deepseek-r1
-```
+   # No Windows (usando Docker)
+   run.bat setup
+   ```
 
-4. Coloque sua documentação na pasta `resources/docs/`:
-```bash
-mkdir -p resources/docs
-# Copie seus arquivos .md ou .html para resources/docs/
-```
-
-5. Instale as dependências:
-```bash
-lein deps
-```
+3. Para iniciar os containers:
+   ```
+   # No Linux (usando Podman)
+   ./run.sh podman-start
+   
+   # No Windows (usando Docker)
+   run.bat docker-start
+   ```
 
 ## Uso
 
-1. Inicie o servidor Ollama:
+### Preparação dos documentos
+Coloque seus documentos em Markdown ou HTML na pasta `resources/docs/`. O sistema processará automaticamente todos os arquivos neste diretório.
+
+### Scripts de execução
+
+#### Linux (run.sh - Usa Podman)
 ```bash
-ollama serve
+# Modo em memória (TF-IDF)
+./run.sh memory
+
+# Modo PostgreSQL
+./run.sh postgres
+
+# Iniciar Podman
+./run.sh podman-start
+
+# Parar Podman
+./run.sh podman-stop
+
+# Ver ajuda
+./run.sh help
 ```
 
-2. Execute o projeto:
-```bash
+#### Windows (run.bat - Usa Docker)
+```batch
+# Modo em memória (TF-IDF)
+run.bat memory
+
+# Modo PostgreSQL
+run.bat postgres
+
+# Iniciar Docker
+run.bat docker-start
+
+# Parar Docker
+run.bat docker-stop
+
+# Ver ajuda
+run.bat help
+```
+
+> **Nota**: Os comandos para iniciar e parar containers aceitam tanto o formato com hífen (`docker-start`) quanto com underscore (`docker_start`). Ambos funcionam da mesma forma, oferecendo flexibilidade na digitação.
+
+### Modo em memória (TF-IDF)
+Para executar o DocAI com a implementação baseada em TF-IDF:
+
+```
+# Usando Leiningen diretamente
 lein run
+
+# Ou usando o script
+./run.sh memory   # Linux
+run.bat memory    # Windows
 ```
 
-3. Faça suas perguntas! Por exemplo:
+Este modo é mais leve e não requer dependências externas, ideal para testes e conjuntos pequenos de documentos.
+
+### Modo PostgreSQL (embeddings densos)
+Para executar o DocAI com a implementação baseada em PostgreSQL:
+
 ```
-🚀 Inicializando DocAI...
-✨ Base de conhecimento pronta! Faça sua pergunta:
-Como implemento autenticação JWT em Clojure?
+# Usando Leiningen diretamente
+lein run --postgres
+
+# Ou usando o script (recomendado, pois configura automaticamente o ambiente)
+./run.sh postgres   # Linux (Podman)
+run.bat postgres    # Windows (Docker)
 ```
 
-4. Para sair, digite "sair" quando solicitado.
+Este modo oferece busca semântica mais robusta e escalável, ideal para grandes conjuntos de documentos.
 
-## Testes
+### Interação
+Uma vez iniciado, o DocAI apresentará um prompt onde você pode digitar suas perguntas. Digite `sair` para encerrar o programa.
 
-Para executar os testes:
+## Arquitetura
+
+### Modo em memória
+```
++-------------+     +-------------+     +-------------+
+| Documentos  | --> | Processador | --> | TF-IDF      |
+| (MD/HTML)   |     | de Texto    |     | Embeddings  |
++-------------+     +-------------+     +-------------+
+                                              |
+                                              v
++-------------+     +-------------+     +-------------+
+| Resposta    | <-- |    LLM      | <-- | Similarity  |
+| ao Usuário  |     | (Ollama)    |     | Search      |
++-------------+     +-------------+     +-------------+
+```
+
+### Modo PostgreSQL
+```
++-------------+     +-------------+     +-------------+
+| Documentos  | --> | PostgreSQL  | --> | pgai        |
+| (MD/HTML)   |     |             |     | Vectorizer  |
++-------------+     +-------------+     +-------------+
+                                              |
+                                              v
++-------------+     +-------------+     +-------------+
+| Resposta    | <-- |    LLM      | <-- | pgvector    |
+| ao Usuário  |     | (Ollama)    |     | Semantic    |
++-------------+     +-------------+     | Search      |
+                                        +-------------+
+```
+
+## Componentes do PostgreSQL
+
+### Extensões utilizadas
+- **pgvector**: Armazenamento e busca vetorial de alta performance
+- **pgai**: Integração com modelos de IA para geração de embeddings e automação
+
+### Estrutura do banco de dados
+- **documentos**: Tabela principal que armazena os documentos
+- **documentos_embeddings**: Tabela que armazena os embeddings gerados
+- **documentos_embeddings_vectorized**: View que combina documentos e embeddings
+
+### Benefícios do modo PostgreSQL
+- Escalabilidade para milhões de documentos
+- Busca semântica de alta precisão com embeddings densos
+- Persistência dos dados e embeddings
+- Possibilidade de indexação avançada (HNSW, IVFFlat)
+- Gerenciamento automático de embeddings via pgai vectorizer
+
+## Desenvolvimento
+
+### Ambiente de desenvolvimento
+O projeto inclui algumas ferramentas úteis para desenvolvimento:
+
+- **lein-cljfmt**: Para formatação de código
+- **lein-kibit**: Para identificação de possíveis melhorias no código
+
+Você pode executar estas ferramentas com os comandos:
+```
+lein cljfmt fix
+lein kibit
+```
+
+### Uso do REPL
+Durante o desenvolvimento, você pode usar o REPL para testar funcionalidades:
+
+```clojure
+;; Para ativar o modo PostgreSQL:
+(reset! docai.core/use-postgres true)
+
+;; Para importar documentos para o PostgreSQL:
+(docai.core/import-docs-to-postgres)
+
+;; Para configurar o PostgreSQL (criar tabelas, etc):
+(docai.pg/setup-pg-rag!)
+```
+
+## Problemas comuns
+
+### Erro "Connection refused" ao conectar no PostgreSQL
+Este erro ocorre quando o PostgreSQL não está acessível na porta 5432. Verifique se:
+1. Os containers Docker/Podman estão em execução (`docker compose ps` ou `podman-compose ps`)
+2. O PostgreSQL está iniciado corretamente
+3. A porta 5432 não está sendo usada por outro processo
+
+### Erro com next.jdbc
+Se você encontrar erros relacionados ao next.jdbc, verifique se está usando a versão correta (1.3.1002).
+
+### Modelos do Ollama
+Certifique-se de que os modelos necessários foram baixados:
+```
+ollama list
+```
+
+## Diferenças entre Docker e Podman
+
+O projeto suporta tanto Docker quanto Podman:
+
+- **Docker**: Utilizado principalmente no Windows através do script `run.bat`
+- **Podman**: Alternativa sem privilégios de root, utilizada no Linux através do script `run.sh`
+
+Os containers e configurações são compatíveis com ambos os sistemas, permitindo escolher a opção mais adequada para seu ambiente.
+
+### Variável de ambiente CONTAINER_ENGINE
+
+A aplicação utiliza a variável de ambiente `CONTAINER_ENGINE` para determinar qual motor de container está sendo usado:
+
+- Quando `CONTAINER_ENGINE=docker`: Os comandos e mensagens são adaptados para Docker
+- Quando `CONTAINER_ENGINE=podman`: Os comandos e mensagens são adaptados para Podman
+
+Esta variável é definida automaticamente pelos scripts:
+- `run.bat` define como "docker" no Windows
+- `run.sh` define como "podman" no Linux
+
+Você pode sobrescrever esta configuração definindo a variável manualmente antes de executar a aplicação:
 
 ```bash
-lein test
+# Para forçar o uso de Docker no Linux
+export CONTAINER_ENGINE=docker
+./run.sh postgres
+
+# Para forçar o uso de Podman no Windows (se instalado)
+set CONTAINER_ENGINE=podman
+run.bat postgres
 ```
-
-Seguimos boas práticas de teste em Clojure:
-- Importação seletiva de funções em vez de `:refer :all`
-- Uso de aliases para namespaces
-- Asserções precisas para comportamentos esperados
-
-
-## Configuração de Desenvolvimento
-
-Este projeto usa [clj-kondo](https://github.com/clj-kondo/clj-kondo) para linting. Recomendamos instalar e configurar:
-
-```bash
-# Instalar clj-kondo
-# Verificar código
-clj-kondo --lint src
-```
-
-## Contribuindo
-
-Contribuições são bem-vindas! Por favor, sinta-se à vontade para:
-
-1. Fazer um fork do projeto
-2. Criar uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abrir um Pull Request
 
 ## Licença
 
-Este projeto está licenciado sob a licença EPL-2.0 - veja o arquivo [LICENSE](LICENSE) para detalhes.
+Este projeto está licenciado sob os termos da licença [Eclipse Public License 2.0](https://www.eclipse.org/legal/epl-2.0/).
