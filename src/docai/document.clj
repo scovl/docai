@@ -46,10 +46,13 @@
 (defn preprocess-chunks
   "Limpa e prepara os chunks de texto para processamento"
   [chunks]
-  (->> chunks
-       (map (fn [chunk] 
-              (-> chunk
-                  (str/join " ")
-                  (str/replace #"\s+" " ")
-                  str/trim)))
-       (filter (complement str/blank?)))) 
+  (when chunks
+    (->> chunks
+         (filter (complement nil?))
+         (map (fn [chunk] 
+                (when chunk
+                  (-> chunk
+                      (str/join " ")
+                      (str/replace #"\s+" " ")
+                      str/trim))))
+         (filter (complement str/blank?))))) 
