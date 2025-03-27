@@ -68,29 +68,34 @@
         (println "⚠️ Erro na chamada primária:" (:error primary-result))
         (println "🔄 Tentando URLs alternativas...")
         
-        ;; Tentar URLs alternativas
-        (let [alternative-hosts ["http://pgai-ollama-1:11434" "http://172.18.0.2:11434" "http://host.docker.internal:11434" "http://localhost:11434"]
-              results (for [host alternative-hosts]
-                        (let [alt-url (str host "/api/generate")
-                              _ (println "🔄 Tentando conectar ao Ollama em" alt-url)
-                              result (try-single-url alt-url options)]
-                          (if (:success result)
-                            (do
-                              (println "✅ Conexão bem-sucedida com" alt-url)
-                              (:result result))
-                            (do
-                              (println "⚠️ Erro ao chamar a API do Ollama: " (:error result))
-                              nil))))
-              successful-results (remove nil? results)]
-          (if (seq successful-results)
-            (first successful-results)
-            ;; Em vez de lançar uma exceção, retorna uma mensagem de erro amigável
+        ;; Lista ampliada de possíveis URLs para Ollama
+        (let [alternative-hosts ["http://pgai-ollama-1:11434"   ;; Nome do contêiner no compose
+                                 "http://ollama:11434"          ;; Nome curto do serviço
+                                 "http://172.18.0.2:11434"      ;; Possível IP interno
+                                 "http://host.docker.internal:11434"  ;; Mapeamento especial para Docker Desktop
+                                 "http://localhost:11434"]      ;; Localhost
+              results (atom [])]
+          
+          ;; Tenta cada URL até uma ter sucesso
+          (doseq [host alternative-hosts]
+            (when (empty? @results)
+              (let [alt-url (str host "/api/generate")
+                    _ (println "🔄 Tentando conectar ao Ollama em" alt-url)
+                    result (try-single-url alt-url options)]
+                (if (:success result)
+                  (do
+                    (println "✅ Conexão bem-sucedida com" alt-url)
+                    (swap! results conj (:result result)))
+                  (println "⚠️ Erro ao chamar a API do Ollama:" (:error result))))))
+          
+          (if (seq @results)
+            (first @results)
             (do
               (println "❌ Todas as tentativas de conexão com Ollama falharam.")
               (str "Não foi possível conectar ao Ollama usando nenhum dos endpoints disponíveis. "
                    "Verifique se o serviço Ollama está em execução e acessível. "
                    "\n\nErro encontrado: O modelo foi encontrado mas não foi possível conectar ao serviço Ollama "
-                   "para processar sua consulta sobre JWT."))))))))
+                   "para processar sua consulta."))))))))
 
 ;; Funções de utilidade para uso futuro:
 ;;
