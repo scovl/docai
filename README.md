@@ -5,12 +5,16 @@ Um aplicativo Clojure que implementa um sistema RAG (Retrieval Augmented Generat
 ## Características
 
 - Suporte a documentos em formato Markdown e HTML
-- Duas implementações de RAG:
+- Três implementações de RAG:
   1. **TF-IDF em memória**: Processamento leve sem dependências externas
   2. **PostgreSQL com pgvector**: Busca semântica escalável usando embeddings densos via pgai
+  3. **RAG Avançado com Agentes**: Processamento de consultas complexas usando workflows com agentes
 - Geração de respostas usando Ollama (modelo deepseek-r1)
 - Processamento de chunking automático de documentos
 - Integração com PostgreSQL, pgvector e pgai para busca semântica robusta
+- Reranqueamento de resultados para maior precisão
+- Workflows com agentes para consultas complexas multi-etapas
+- Monitoramento e métricas para avaliar qualidade das respostas
 
 ## Pré-requisitos
 
@@ -68,6 +72,9 @@ Coloque seus documentos em Markdown ou HTML na pasta `resources/docs/`. O sistem
 # Modo PostgreSQL
 ./run.sh postgres
 
+# Modo RAG avançado com agentes
+./run.sh advanced
+
 # Iniciar Podman
 ./run.sh podman-start
 
@@ -86,6 +93,9 @@ run.bat memory
 # Modo PostgreSQL
 run.bat postgres
 
+# Modo RAG avançado com agentes
+run.bat advanced
+
 # Iniciar Docker
 run.bat docker-start
 
@@ -97,6 +107,63 @@ run.bat help
 ```
 
 > **Nota**: Os comandos para iniciar e parar containers aceitam tanto o formato com hífen (`docker-start`) quanto com underscore (`docker_start`). Ambos funcionam da mesma forma, oferecendo flexibilidade na digitação.
+
+### Comandos disponíveis com lein run
+
+O DocAI oferece diversos comandos para uso direto via lein run:
+
+```bash
+# Execução básica (modo em memória com TF-IDF)
+lein run
+
+# Modo interativo de busca
+lein run --search
+
+# Busca específica
+lein run --search "Como implementar autenticação JWT?"
+
+# Modo PostgreSQL com busca semântica
+lein run --postgres
+
+# Consulta direta usando PostgreSQL
+lein run --postgres "Como implementar autenticação JWT?"
+
+# RAG avançado com workflows inteligentes
+lein run --advanced
+
+# Consulta direta usando RAG avançado
+lein run --advanced "Como implementar autenticação JWT?"
+
+# Workflow explícito com agentes para consultas complexas
+lein run --agents "Compare os diferentes algoritmos de hashing para senhas"
+
+# Processar um único arquivo (TF-IDF)
+lein run --process path/to/file.md
+
+# Processar um único arquivo com chunking dinâmico
+lein run --process-dynamic path/to/file.md
+
+# Importar um diretório
+lein run --import path/to/directory
+
+# Importar um diretório com chunking dinâmico
+lein run --import-dynamic path/to/directory
+
+# Limpar caches e dados temporários
+lein run --clean
+
+# Ver métricas dos últimos N dias
+lein run --metrics 7
+
+# Fornecer feedback para uma consulta específica
+lein run --feedback <query_id>
+
+# Ver ajuda completa
+lein run --help
+
+# Ver versão
+lein run --version
+```
 
 ### Modo em memória (TF-IDF)
 Para executar o DocAI com a implementação baseada em TF-IDF:
@@ -125,6 +192,25 @@ run.bat postgres    # Windows (Docker)
 ```
 
 Este modo oferece busca semântica mais robusta e escalável, ideal para grandes conjuntos de documentos.
+
+### Modo RAG Avançado com Agentes
+Para executar o DocAI com a implementação avançada que inclui workflows com agentes:
+
+```
+# Usando Leiningen diretamente
+lein run --advanced
+
+# Ou usando o script (recomendado, pois configura automaticamente o ambiente)
+./run.sh advanced   # Linux (Podman)
+run.bat advanced    # Windows (Docker)
+```
+
+Este modo é o mais poderoso, incorporando:
+- Chunking dinâmico adaptativo
+- Reranqueamento de resultados
+- Workflows com agentes para consultas complexas
+- Cache multi-camada para respostas e embeddings
+- Monitoramento e métricas avançadas
 
 ### Interação
 Uma vez iniciado, o DocAI apresentará um prompt onde você pode digitar suas perguntas. Digite `sair` para encerrar o programa.
@@ -158,6 +244,28 @@ Uma vez iniciado, o DocAI apresentará um prompt onde você pode digitar suas pe
 | ao Usuário  |     | (Ollama)    |     | Semantic    |
 +-------------+     +-------------+     | Search      |
                                         +-------------+
+```
+
+### Modo RAG Avançado com Agentes
+```
++-------------+     +-------------+     +-------------+
+| Consulta    | --> | Analisador  | --> | Workflow    |
+| Complexa    |     | de Consulta |     | de Agentes  |
++-------------+     +-------------+     +-------------+
+                                              |
+                          +---------+---------+---------+
+                          |         |         |         |
+                          v         v         v         v
++-------------+     +-------------+     +-------------+
+| Documentos  | --> | Agente de   | --> | Agente de   |
+| (MD/HTML)   |     | Pesquisa    |     | Raciocínio  |
++-------------+     +-------------+     +-------------+
+                                              |
+                                              v
++-------------+     +-------------+     +-------------+
+| Resposta    | <-- | Sintetizador| <-- | Verificador |
+| Final       |     |             |     |             |
++-------------+     +-------------+     +-------------+
 ```
 
 ## Componentes do PostgreSQL
