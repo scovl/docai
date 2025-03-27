@@ -91,22 +91,22 @@
                     "2. Completa (responde todos os aspectos da pergunta)\n"
                     "3. Precisa (não contém informações incorretas)\n\n"
                     "Consulta: " query "\n\n"
-                    "Contexto: " (if (> (count context) 300) 
-                                  (str (subs context 0 300) "...") context) "\n\n"
+                    "Contexto: " (if (> (count context) 300)
+                                   (str (subs context 0 300) "...") context) "\n\n"
                     "Resposta: " response "\n\n"
                     "Se a resposta for adequada, apenas responda 'A resposta está correta'. "
                     "Caso contrário, forneça uma versão melhorada.")
-        
+
         ;; Chamar o modelo diretamente com o prompt
         verification (llm/call-ollama-api prompt)]
-    
+
     ;; Se a verificação indicar que a resposta está correta, retornar a original
     ;; Caso contrário, retornar a versão melhorada
     (if (str/includes? verification "A resposta está correta")
       response
-      (let [improved-version (str/replace verification 
-                                         #"(?i).*?\b(a resposta melhorada seria:|versão melhorada:|resposta corrigida:|sugestão de resposta:|aqui está uma versão melhorada:)\s*" 
-                                         "")]
+      (let [improved-version (str/replace verification
+                                          #"(?i).*?\b(a resposta melhorada seria:|versão melhorada:|resposta corrigida:|sugestão de resposta:|aqui está uma versão melhorada:)\s*"
+                                          "")]
         improved-version))))
 
 (defn- execute-subtask
@@ -118,35 +118,35 @@
                        :reasoning (str "Analise e explique: " subtask)
                        :calculation (str "Calcule ou analise numericamente: " subtask)
                        (str "Responda a seguinte questão: " subtask))
-        
+
         ;; Adicionar contexto dos resultados anteriores, se houver
         context-str (when (seq previous-results)
                       (str "Com base nas seguintes informações obtidas até agora:\n\n"
                            (str/join "\n\n" previous-results)
                            "\n\n"))
-        
+
         ;; Processar contexto e subtask para segurança
         safe-context (sanitize-text (or context-str ""))
         safe-subtask (sanitize-text subtask)
-        
+
         ;; Criar prompt específico para o agente 
         agent-description (get agent-types agent-type)
-        
+
         ;; Combinar tudo em um prompt final
-        full-prompt (llm/format-prompt safe-context 
-                                      (str "Você é um agente " agent-description
-                                          " Você deve focar apenas nesta tarefa específica. "
-                                          "Seja conciso e forneça apenas informações relevantes para a tarefa.\n\n"
-                                          agent-prompt "\n\n" safe-subtask))
-        
+        full-prompt (llm/format-prompt safe-context
+                                       (str "Você é um agente " agent-description
+                                            " Você deve focar apenas nesta tarefa específica. "
+                                            "Seja conciso e forneça apenas informações relevantes para a tarefa.\n\n"
+                                            agent-prompt "\n\n" safe-subtask))
+
         ;; Chamar o LLM para obter resposta
         start-time (System/currentTimeMillis)
         response (llm/call-ollama-api full-prompt)
         duration (- (System/currentTimeMillis) start-time)
-        
+
         ;; Garantir que a resposta seja segura
         safe-response (sanitize-text response)]
-    
+
     ;; Retornar o resultado formatado
     {:response safe-response
      :duration duration
@@ -163,72 +163,72 @@
         (println "Usando resposta em cache para consulta complexa")
         cached)
       (let [start-time (System/currentTimeMillis)
-            
+
             ;; Analisar a consulta para determinar intenção e sub-questões
             analysis (analyze-query query)
             primary-intent (get-agent-type (:intent analysis))
             subtasks (or (:sub_questions analysis) [query])
-            
+
             ;; Resultados parciais
             results (atom [])
-            
+
             ;; Executar cada subtarefa em sequência
             _ (doseq [subtask subtasks]
-                (let [agent-result (execute-subtask 
-                                     subtask 
-                                     primary-intent
-                                     @results)]
+                (let [agent-result (execute-subtask
+                                    subtask
+                                    primary-intent
+                                    @results)]
                   (swap! results conj (:response agent-result))))
-            
+
             ;; Gerar resposta final sintetizada
             synthesis-prompt (str "Com base nas seguintes informações:\n\n"
-                                 (str/join "\n\n" @results)
-                                 "\n\nResponda à pergunta original de forma completa e coerente: " query)
-            
+                                  (str/join "\n\n" @results)
+                                  "\n\nResponda à pergunta original de forma completa e coerente: " query)
+
             initial-response (llm/call-ollama-api synthesis-prompt)
-            
+
             ;; Obter contexto combinado para verificação
             combined-context (str/join "\n\n" @results)
-            
+
             ;; Verificar a qualidade da resposta
             final-response (verify-response query combined-context initial-response)
-            
+
             duration (- (System/currentTimeMillis) start-time)]
-        
+
         ;; Registrar no cache
         (swap! agent-cache assoc query
-               (if (personal-query? query) 
-                 final-response 
+               (if (personal-query? query)
+                 final-response
                  final-response))
-        
+
         ;; Registrar métricas usando a função de log do pacote metrics
         (metrics/log-rag-interaction query [] final-response duration)
-        
+
         ;; Registrar informações adicionais sobre o processo de agentes
         (when (pg/check-postgres-connection)
           (try
             (let [conn (jdbc/get-connection pg/db-spec)]
               (jdbc/execute! conn
-                            ["INSERT INTO agent_executions 
+                             ["INSERT INTO agent_executions 
                               (query, primary_intent, agent_type, subtasks, duration_ms) 
                               VALUES (?, ?, ?, ?, ?)"
-                             query
-                             (name (:intent analysis))
-                             (name primary-intent)
-                             (count subtasks)
-                             duration])
+                              query
+                              (name (:intent analysis))
+                              (name primary-intent)
+                              (count subtasks)
+                              duration])
               (.close conn))
             (catch Exception e
               (println "Erro ao registrar execução de agente:" (.getMessage e)))))
-        
+
         final-response))))
 
 (defn needs-agent-workflow?
   "Determina se uma consulta é complexa o suficiente para justificar o uso do workflow de agentes"
   [query]
   (let [complexity-indicators ["compare" "diferença" "explique" "analise" "relação" "calcule"
-                              "passo a passo" "como funciona" "por que" "pros e contras"
-                              "vantagens" "desvantagens" "múltiplos" "diversos"]]
+                               "passo a passo" "como funciona" "por que" "pros e contras"
+                               "vantagens" "desvantagens" "múltiplos" "diversos"]]
     (or (> (count (str/split query #"\s+")) 15)  ;; Consultas longas
         (some #(str/includes? (str/lower-case query) %) complexity-indicators))))
 
@@ -241,10 +241,10 @@
     (try
       (println "Configurando tabelas para o sistema de agentes...")
       (let [conn (jdbc/get-connection pg/db-spec)]
-        
+
         ;; Tabela para armazenar informações sobre execuções de agentes
-        (jdbc/execute! conn 
-                      ["CREATE TABLE IF NOT EXISTS agent_executions (
+        (jdbc/execute! conn
+                       ["CREATE TABLE IF NOT EXISTS agent_executions (
                         id SERIAL PRIMARY KEY,
                         query TEXT NOT NULL,
                         primary_intent TEXT NOT NULL,
@@ -253,7 +253,7 @@
                         duration_ms INTEGER NOT NULL,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                       )"])
-                      
+
         (println "✅ Tabelas para o sistema de agentes configuradas com sucesso!")
         true)
       (catch Exception e
@@ -269,4 +269,4 @@
   [query]
   (if (needs-agent-workflow? query)
     (execute-agent-workflow query)
-    (adv-rag/advanced-rag-query query))) 
+    (adv-rag/advanced-rag-query query)))
