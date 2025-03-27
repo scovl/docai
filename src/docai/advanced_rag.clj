@@ -1,6 +1,5 @@
 (ns docai.advanced-rag
   (:require [clojure.string :as str]
-            [clojure.data.json :as json]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [docai.llm :as llm]
@@ -44,6 +43,20 @@
                      updated-cache)))))
       embedding)))
 
+(defn ^:private cached-rag-query
+  "Executa consulta RAG com cache ou armazena o resultado no cache"
+  [query response]
+  ;; Armazenar no cache apenas para consultas não-pessoais
+  (when (not (personal-query? query))
+    (swap! response-cache 
+           (fn [cache]
+             (let [updated-cache (assoc cache query {:response response
+                                                    :timestamp (System/currentTimeMillis)})]
+               ;; Limitar tamanho do cache
+               (if (> (count updated-cache) max-cache-size)
+                 (into {} (take max-cache-size updated-cache))
+                 updated-cache)))))
+  response)
 
 ;; Função principal para processamento RAG avançado
 (defn advanced-rag-query
@@ -82,33 +95,8 @@
           ;; Log para análise
           (println "Consulta processada em" total-time "ms")
           
-          ;; Atualizar cache se não for consulta pessoal
-          (when (not (personal-query? query))
-            (swap! response-cache assoc query {:response response
-                                              :timestamp (System/currentTimeMillis)}))
-          
-          response)))))
-
-(defn cached-rag-query
-  "Executa consulta RAG com cache"
-  [query]
-  (if-let [cached (@response-cache query)]
-    (do
-      (println "Cache hit para consulta!")
-      cached)
-    (let [;; Processo RAG completo
-          response (advanced-rag-query query)]
-      ;; Armazenar no cache apenas para consultas não-pessoais
-      (when (not (personal-query? query))
-        (swap! response-cache 
-               (fn [cache]
-                 (let [updated-cache (assoc cache query {:response response
-                                                        :timestamp (System/currentTimeMillis)})]
-                   ;; Limitar tamanho do cache
-                   (if (> (count updated-cache) max-cache-size)
-                     (into {} (take max-cache-size updated-cache))
-                     updated-cache)))))
-      response)))
+          ;; Atualizar cache usando a função auxiliar
+          (cached-rag-query query response))))))
 
 (defn personal-query?
   "Verifica se a consulta contém informações pessoais que não devem ser cacheadas"
@@ -199,52 +187,56 @@
 (defn create-vectorizer-with-adaptive-chunking!
   "Configura vectorizer com chunking adaptativo"
   [document-type]
-  (let [conn (jdbc/get-connection pg/db-spec)
-        {:keys [chunk-size chunk-overlap]} (adaptive-chunking-strategy document-type)
+  (println "Configurando vectorizer para documento tipo:" document-type)
+  (let [chunking-params (adaptive-chunking-strategy document-type)
+        chunk-size (:chunk-size chunking-params)
         table-name (str "documentos_embeddings_" document-type)
-        
-        ;; Tenta criar o vectorizer e captura erros específicos de "já existe"
-        vectorizer-sql (str "SELECT ai.create_vectorizer(
-                             'documentos'::regclass,
-                             destination => 'documentos_embeddings_" document-type "',
-                             embedding => ai.embedding_ollama('nomic-embed-text', 768),
-                             chunking => ai.chunking_recursive_character_text_splitter('conteudo', 
-                                                                                    chunk_size => " chunk-size ")
-                           )")]
+        conn (jdbc/get-connection pg/db-spec)]
     
     (try
-      (println "Tentando criar vectorizer para" table-name "...")
-      (jdbc/execute! conn [vectorizer-sql])
-      (println "✅ Vectorizer para tipo" document-type "configurado com sucesso")
+      ;; Tentar criar a tabela de embeddings
+      (jdbc/execute! 
+       conn
+       [(str "CREATE TABLE IF NOT EXISTS " table-name " (
+              id TEXT PRIMARY KEY,
+              embedding VECTOR(768)
+            )")])
       
+      ;; Configurar vectorizer com chunking adaptativo
+      (jdbc/execute!
+       conn
+       [(str "CREATE OR REPLACE FUNCTION ai.vectorize_" document-type "()\n"
+             "RETURNS TRIGGER AS $$\n"
+             "BEGIN\n"
+             "  INSERT INTO " table-name " (id, embedding)\n"
+             "  VALUES (NEW.id, ai.ollama_embed('nomic-embed-text', NEW.conteudo))\n"
+             "  ON CONFLICT (id) DO UPDATE\n"
+             "    SET embedding = ai.ollama_embed('nomic-embed-text', NEW.conteudo);\n"
+             "  RETURN NEW;\n"
+             "END;\n"
+             "$$ LANGUAGE plpgsql;")])
+      
+      ;; Criar o trigger
+      (jdbc/execute!
+       conn
+       [(str "DROP TRIGGER IF EXISTS vectorize_" document-type " ON documentos;")]
+       {:return-keys false})
+      
+      (jdbc/execute!
+       conn
+       [(str "CREATE TRIGGER vectorize_" document-type "\n"
+             "AFTER INSERT OR UPDATE ON documentos\n"
+             "FOR EACH ROW\n"
+             "WHEN (NEW.categoria = '" document-type "')\n"
+             "EXECUTE FUNCTION ai.vectorize_" document-type "();")]
+       {:return-keys false})
+      
+      (println "✅ Vectorizer para documentos tipo" document-type "configurado com sucesso!\n"
+               "   Usando chunk_size:" chunk-size)
       (catch Exception e
-        (let [error-msg (.getMessage e)]
-          ;; Verifica se o erro é devido a tabela já existir
-          (if (str/includes? error-msg "already exists")
-            (println "✅ Vectorizer para tipo" document-type "já existe, ignorando criação.")
-            
-            ;; Se for outro tipo de erro, tenta abordagem simplificada
-            (do
-              (println "❌ Erro ao configurar vectorizer:" (.getMessage e))
-              
-              ;; Tentar abordagem alternativa sem parâmetros adicionais
-              (try
-                (println "🔄 Tentando abordagem alternativa simplificada...")
-                (let [simple-sql (str "SELECT ai.create_vectorizer(
-                                    'documentos'::regclass,
-                                    destination => 'documentos_embeddings_" document-type "',
-                                    embedding => ai.embedding_ollama('nomic-embed-text', 768),
-                                    chunking => ai.chunking_recursive_character_text_splitter('conteudo')
-                                  )")]
-                  (jdbc/execute! conn [simple-sql])
-                  (println "✅ Vectorizer (versão simplificada) configurado com sucesso"))
-                (catch Exception e2
-                  (let [error-msg2 (.getMessage e2)]
-                    (if (str/includes? error-msg2 "already exists")
-                      (println "✅ Vectorizer para tipo" document-type "já existe, ignorando criação.")
-                      (println "❌ Erro na abordagem alternativa:" (.getMessage e2)))))))))))
-    
-    (.close conn)))
+        (println "⚠️ Aviso: Erro ao configurar vectorizer para" document-type ":" (.getMessage e)))
+      (finally
+        (.close conn)))))
 
 ;; Função para processar um documento com chunking dinâmico e inserir no banco
 (defn process-document-with-dynamic-chunking!
@@ -425,8 +417,6 @@
       (some #(str/includes? lower-query %) complex-patterns) :complex
       (some #(str/includes? lower-query %) structured-patterns) :structured-data
       :else :simple)))
-
-
 
 (defn setup-advanced-rag!
   "Configura o ambiente para RAG avançado"
