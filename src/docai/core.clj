@@ -157,6 +157,16 @@
     ;; Registrar métricas
     (metrics/log-rag-interaction query [] response latency)
     
+    ;; Avaliar qualidade da resposta (apenas para monitoramento)
+    (future
+      (try
+        (let [context "Contexto não disponível na implementação atual"]
+          (println "Avaliando qualidade da resposta em background...")
+          (let [quality-score (metrics/evaluate-response-quality query context response)]
+            (println "Score de qualidade da resposta:" (:faithfulness quality-score))))
+        (catch Exception e
+          (println "Erro ao avaliar qualidade da resposta:" (.getMessage e)))))
+    
     response))
 
 (defn import-docs-to-postgres
@@ -176,8 +186,7 @@
     (if (and file-path (.isFile (io/file file-path)))
       (do
         (println "Processando arquivo com chunking dinâmico:" file-path)
-        (require '[docai.document :as doc])
-        ((resolve 'docai.document/process-with-dynamic-chunking) file-path))
+        (doc/process-with-dynamic-chunking file-path))
       (println "Arquivo inválido ou não encontrado:" file-path))))
 
 (defn process-dir-dynamic
@@ -187,8 +196,7 @@
     (if (and dir-path (.isDirectory (io/file dir-path)))
       (do
         (println "Processando diretório com chunking dinâmico:" dir-path)
-        (require '[docai.document :as doc])
-        ((resolve 'docai.document/process-directory-with-dynamic-chunking) dir-path))
+        (doc/process-directory-with-dynamic-chunking dir-path))
       (println "Diretório inválido ou não encontrado:" dir-path))))
 
 (defn display-help
@@ -206,6 +214,8 @@ Comandos disponíveis:
   --advanced               Inicia o sistema com RAG avançado
   --search <consulta>      Realiza uma busca com a consulta fornecida
   --clean                  Limpa dados temporários
+  --metrics <dias>         Exibe métricas RAG dos últimos N dias
+  --feedback <query_id>    Fornece feedback para uma consulta específica
   
   --process-dynamic <arquivo>    Processa um arquivo com chunking dinâmico
   --import-dynamic <diretório>   Importa diretório com chunking dinâmico
@@ -268,7 +278,7 @@ Comandos disponíveis:
 
 (defn run-with-postgres
   "Inicia o sistema com suporte a PostgreSQL"
-  [args]
+  [_]
   (reset! use-postgres true)
   (println "Configurando ambiente PostgreSQL para RAG...")
   ;; Configurar Ollama para usar o endereço do container
@@ -280,7 +290,7 @@ Comandos disponíveis:
 
 (defn run-with-advanced-rag
   "Inicia o sistema com RAG avançado"
-  [args]
+  [_]
   (reset! use-postgres true)
   (reset! use-advanced-rag true)
   (println "Configurando ambiente PostgreSQL para RAG avançado...")
@@ -301,6 +311,42 @@ Comandos disponíveis:
   (reset! adv-rag/response-cache {})
   (println "Caches limpos com sucesso!"))
 
+(defn show-metrics
+  "Exibe métricas do sistema RAG"
+  [args]
+  (let [days (if (seq args)
+               (try
+                 (Integer/parseInt (first args))
+                 (catch Exception _ 7))
+               7) ;; Padrão: últimos 7 dias
+        end-date (java.util.Date.)
+        start-date (-> (java.util.Calendar/getInstance)
+                       (doto (.setTime end-date)
+                             (.add java.util.Calendar/DAY_OF_MONTH (- days)))
+                       (.getTime))]
+    
+    (println "Calculando métricas dos últimos" days "dias...")
+    (let [metrics (metrics/calculate-rag-metrics start-date end-date)]
+      (if metrics
+        (do
+          (println "=== Métricas do Sistema RAG ===")
+          (println "Período:" start-date "até" end-date)
+          (println "Total de consultas:" (:total_queries metrics))
+          (println "Latência média:" (:avg_latency metrics) "ms")
+          (println "Latência P95:" (:p95_latency metrics) "ms"))
+        (println "Não foi possível calcular métricas para o período especificado.")))))
+
+(defn provide-feedback
+  "Permite ao usuário fornecer feedback para uma consulta específica"
+  [args]
+  (if-let [query-id (first args)]
+    (try
+      (let [query-id-int (Integer/parseInt query-id)]
+        (metrics/collect-user-feedback query-id-int))
+      (catch NumberFormatException e
+        (println "ID de consulta inválido. Forneça um número inteiro válido:" (.getMessage e))))
+    (println "Por favor, forneça o ID da consulta para a qual deseja dar feedback.")))
+
 (defn -main
   "Função principal do DocAI"
   [& args]
@@ -318,6 +364,8 @@ Comandos disponíveis:
                    (search-docs (first rest-args))
                    (search-cli))
       "--clean" (clean-data)
+      "--metrics" (show-metrics rest-args)
+      "--feedback" (provide-feedback rest-args)
       
       ;; Novos comandos para chunking dinâmico
       "--process-dynamic" (process-file-dynamic rest-args)
