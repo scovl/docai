@@ -22,7 +22,7 @@
       "podman"
       "docker")))
 
-(defn- check-postgres-connection
+(defn check-postgres-connection
   "Verifica se o PostgreSQL está acessível no host e porta especificados"
   []
   (try
@@ -203,10 +203,31 @@
   (if (check-postgres-connection)
     (let [conn (jdbc/get-connection db-spec)]
       (try
-        (println "🔄 Executando busca semântica direta (sem host explícito)")
-        ;; Primeiro tenta com a URL precisa, depois tem fallbacks
+        (println "🔄 Executando busca semântica usando cache de embeddings")
+        ;; Usar a função de cache para embeddings
         (try
-          (let [search-sql-direct "WITH query_embedding AS (
+          (let [search-sql-cached "WITH query_embedding AS (
+                       SELECT get_cached_embedding(?) AS embedding
+                     )
+                     SELECT
+                       d.id,
+                       d.titulo,
+                       d.conteudo,
+                       d.categoria,
+                       t.embedding <=> (SELECT embedding FROM query_embedding) AS distancia
+                     FROM documentos_embeddings t
+                     LEFT JOIN documentos d ON t.id = d.id
+                     ORDER BY distancia
+                     LIMIT ?"
+                results (jdbc/execute! conn [search-sql-cached query limit]
+                                      {:builder-fn rs/as-unqualified-maps})]
+            results)
+          (catch Exception e
+            (println "⚠️ Erro ao usar cache:" (.getMessage e))
+            (println "🔄 Tentando abordagem alternativa sem cache...")
+            
+            ;; Fallback para o método original se o cache falhar
+            (let [search-sql "WITH query_embedding AS (
                        SELECT ai.ollama_embed('nomic-embed-text', ?) AS embedding
                      )
                      SELECT
@@ -219,69 +240,66 @@
                      LEFT JOIN documentos d ON t.id = d.id
                      ORDER BY distancia
                      LIMIT ?"
-                results (jdbc/execute! conn [search-sql-direct query limit]
+                results (jdbc/execute! conn [search-sql query limit]
                                       {:builder-fn rs/as-unqualified-maps})]
-            results)
-          (catch Exception e
-            (println "⚠️ Erro na primeira tentativa:" (.getMessage e))
-            (println "🔄 Tentando abordagem alternativa com host explícito...")
-            
-            ;; Se a primeira abordagem falhar, tenta com host específico
-            (let [search-sql-with-host "WITH query_embedding AS (
-                       SELECT ai.ollama_embed('nomic-embed-text', ?, host => ?) AS embedding
-                     )
-                     SELECT
-                       d.id,
-                       d.titulo,
-                       d.conteudo,
-                       d.categoria,
-                       t.embedding <=> (SELECT embedding FROM query_embedding) AS distancia
-                     FROM documentos_embeddings t
-                     LEFT JOIN documentos d ON t.id = d.id
-                     ORDER BY distancia
-                     LIMIT ?"
-                  
-                  ;; Define a função que tentará um único host
-                  try-host (fn [host]
-                             (try
-                               (let [result (jdbc/execute! conn [search-sql-with-host query host (* 3 limit)]
-                                                         {:builder-fn rs/as-unqualified-maps})]
-                                 {:success true, :result result})
-                               (catch Exception err
-                                 {:success false, 
-                                  :error (.getMessage err), 
-                                  :host host})))
-                  
-                  ;; Lista de hosts para tentar
-                  hosts ["http://localhost:11434"]]
-              
-              ;; Tenta cada host em sequência
-              (loop [remaining-hosts hosts
-                     last-error nil]
-                (if (empty? remaining-hosts)
-                  (do
-                    (println "❌ Todas as tentativas de conexão com Ollama falharam. Último erro:" last-error)
-                    [])
-                  (let [host (first remaining-hosts)
-                        _ (println "🔄 Tentando conectar ao Ollama em" host)
-                        result (try-host host)]
-                    (if (and (:success result) (seq (:result result)))
-                      (do
-                        (println "✅ Conexão bem-sucedida com" host)
-                        (when (seq (:result result))
-                          (doseq [doc (:result result)]
-                            (println "  - Documento:" (:id doc) "- Título:" (:titulo doc) "- Distância:" (:distancia doc))))
-                        (:result result))
-                      (recur (rest remaining-hosts) 
-                             (or (:error result) 
-                                 last-error 
-                                 "Erro desconhecido")))))))))
+              results)))
         (catch Exception e
           (println "❌ Erro na busca semântica:" (.getMessage e))
           [])
         (finally
           (.close conn))))
     []))
+
+(defn setup-embedding-cache!
+  "Cria e configura tabela de cache para embeddings"
+  []
+  (if (check-postgres-connection)
+    (let [conn (jdbc/get-connection db-spec)
+          create-cache-table "CREATE TABLE IF NOT EXISTS query_embedding_cache (
+                              query_text TEXT PRIMARY KEY,
+                              embedding VECTOR(768),
+                              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                              hit_count INTEGER DEFAULT 1
+                            )"
+          create-cache-function "CREATE OR REPLACE FUNCTION get_cached_embedding(query TEXT)
+                             RETURNS VECTOR AS $$
+                             DECLARE
+                               cached_embedding VECTOR(768);
+                             BEGIN
+                               -- Verificar se existe no cache
+                               SELECT embedding INTO cached_embedding
+                               FROM query_embedding_cache
+                               WHERE query_text = query;
+                               
+                               -- Se existe, atualizar contador e retornar
+                               IF FOUND THEN
+                                 UPDATE query_embedding_cache 
+                                 SET hit_count = hit_count + 1 
+                                 WHERE query_text = query;
+                                 RETURN cached_embedding;
+                               ELSE
+                                 -- Gerar novo embedding
+                                 cached_embedding := ai.ollama_embed('nomic-embed-text', query);
+                                 
+                                 -- Armazenar no cache
+                                 INSERT INTO query_embedding_cache (query_text, embedding)
+                                 VALUES (query, cached_embedding);
+                                 
+                                 RETURN cached_embedding;
+                               END IF;
+                             END;
+                             $$ LANGUAGE plpgsql;"]
+      (try
+        (jdbc/execute! conn [create-cache-table])
+        (jdbc/execute! conn [create-cache-function])
+        (println "✅ Cache de embeddings configurado com sucesso")
+        true
+        (catch Exception e
+          (println "❌ Erro ao configurar cache de embeddings:" (.getMessage e))
+          false)
+        (finally
+          (.close conn))))
+    false))
 
 (defn setup-pg-rag!
   "Configura todo o ambiente PostgreSQL para RAG"
@@ -292,5 +310,7 @@
       (when (create-tables!)
         ;; Configura o Ollama para usar o endereço do Docker
         (llm/set-ollama-docker-mode!)
+        ;; Configurar cache de embeddings
+        (setup-embedding-cache!)
         (create-vectorizer!)))
     (println "⚠️ Avançando para modo de contingência sem PostgreSQL..."))) 
