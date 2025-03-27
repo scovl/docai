@@ -7,6 +7,7 @@
             [docai.pg :as pg]
             [docai.advanced-rag :as adv-rag]
             [docai.metrics :as metrics]
+            [docai.agents :as agents]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:gen-class))
@@ -150,7 +151,16 @@
   [query]
   (println "DEBUG - Processando query com RAG avançado:" query)
   (let [start-time (System/currentTimeMillis)
-        response (adv-rag/advanced-rag-query query)
+        ;; Verificar se a consulta precisa do workflow com agentes
+        need-agents (agents/needs-agent-workflow? query)
+        _ (when need-agents
+            (println "DEBUG - Consulta identificada como complexa, usando workflow com agentes"))
+        
+        ;; Escolher o processamento adequado
+        response (if need-agents
+                   (agents/process-with-agents query)
+                   (adv-rag/advanced-rag-query query))
+        
         end-time (System/currentTimeMillis)
         latency (- end-time start-time)]
     
@@ -200,26 +210,25 @@
       (println "Diretório inválido ou não encontrado:" dir-path))))
 
 (defn display-help
-  "Exibe a ajuda do sistema"
+  "Exibe a ajuda do DocAI"
   []
-  (println "
-DocAI - Sistema de RAG Avançado
-
-Comandos disponíveis:
-  --help                   Exibe esta ajuda
-  --version                Exibe a versão do sistema
-  --process <arquivo>      Processa um único arquivo
-  --import <diretório>     Importa todos os documentos de um diretório
-  --postgres               Inicia o sistema com suporte a PostgreSQL
-  --advanced               Inicia o sistema com RAG avançado
-  --search <consulta>      Realiza uma busca com a consulta fornecida
-  --clean                  Limpa dados temporários
-  --metrics <dias>         Exibe métricas RAG dos últimos N dias
-  --feedback <query_id>    Fornece feedback para uma consulta específica
-  
-  --process-dynamic <arquivo>    Processa um arquivo com chunking dinâmico
-  --import-dynamic <diretório>   Importa diretório com chunking dinâmico
-"))
+  (println "DocAI - RAG para Documentação Técnica\n")
+  (println "Uso: docai [comando] [opções]\n")
+  (println "Comandos disponíveis:")
+  (println "--help                 Exibe esta mensagem de ajuda")
+  (println "--version              Exibe a versão do DocAI")
+  (println "--process <arquivo>    Processa um arquivo e adiciona à base de conhecimento")
+  (println "--import <diretório>   Importa todos os arquivos de um diretório")
+  (println "--postgres <query>     Usa o PostgreSQL para busca semântica")
+  (println "--advanced <query>     Usa o RAG avançado para consultas")
+  (println "--agents <query>       Usa explicitamente o workflow com agentes para consultas complexas")
+  (println "--search <query>       Busca informações na base de conhecimento")
+  (println "--search               Inicia modo interativo de busca")
+  (println "--clean                Limpa dados em memória")
+  (println "--metrics <dias>       Exibe métricas RAG dos últimos N dias")
+  (println "--feedback <query-id>  Fornece feedback para uma consulta específica")
+  (println "--process-dynamic <arquivo>    Processa um arquivo com chunking dinâmico")
+  (println "--import-dynamic <diretório>   Importa diretório com chunking dinâmico"))
 
 (defn display-version
   "Exibe a versão do sistema"
@@ -298,17 +307,19 @@ Comandos disponíveis:
   (llm/set-ollama-docker-mode!)
   (pg/setup-pg-rag!)
   (metrics/setup-metrics-tables!)
+  (agents/setup-agent-tables!)
   (adv-rag/setup-advanced-rag!)
   (import-docs-to-postgres)
   (println "RAG avançado pronto!")
   (search-cli))
 
 (defn clean-data
-  "Limpa dados temporários"
+  "Limpa dados em memória e caches"
   []
   (println "Limpando caches e dados temporários...")
   (reset! adv-rag/embedding-cache {})
   (reset! adv-rag/response-cache {})
+  (reset! agents/agent-cache {})
   (println "Caches limpos com sucesso!"))
 
 (defn show-metrics
@@ -347,9 +358,35 @@ Comandos disponíveis:
         (println "ID de consulta inválido. Forneça um número inteiro válido:" (.getMessage e))))
     (println "Por favor, forneça o ID da consulta para a qual deseja dar feedback.")))
 
+(defn query-with-agents
+  "Processa uma consulta utilizando explicitamente o workflow com agentes"
+  [args]
+  (if-let [query (first args)]
+    (let [response (agents/execute-agent-workflow query)]
+      (println "\n------ Resposta ------")
+      (println response)
+      (println "-----------------------\n"))
+    (println "Por favor, forneça uma consulta após o comando --agents")))
+
+(defn setup-system
+  "Configura todo o sistema DocAI na inicialização"
+  []
+  (println "Configurando o sistema DocAI...")
+  
+  ;; Verificar e configurar PostgreSQL
+  (when (pg/check-postgres-connection)
+    (pg/setup-pg-rag!)
+    (metrics/setup-metrics-tables!)
+    (agents/setup-agent-tables!))
+  
+  (println "Sistema DocAI configurado com sucesso!"))
+
 (defn -main
   "Função principal do DocAI"
   [& args]
+  ;; Inicializar o sistema
+  (setup-system)
+  
   (let [command (first args)
         rest-args (rest args)]
     (case command
@@ -360,6 +397,7 @@ Comandos disponíveis:
       "--import" (import-directory rest-args)
       "--postgres" (run-with-postgres rest-args)
       "--advanced" (run-with-advanced-rag rest-args)
+      "--agents" (query-with-agents rest-args)
       "--search" (if (seq rest-args)
                    (search-docs (first rest-args))
                    (search-cli))
