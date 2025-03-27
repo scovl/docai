@@ -19,9 +19,14 @@
 (defn- load-documentation
   "Carrega todos os arquivos de documentação do diretório configurado"
   []
-  (->> (file-seq (io/file docs-path))
-       (filter #(.isFile %))
-       (map #(.getPath %))))
+  (if-not (.exists (io/file docs-path))
+    (do
+      (println "Criando diretório de documentação:" docs-path)
+      (.mkdirs (io/file docs-path))
+      [])
+    (let [files (filter #(.isFile %) (file-seq (io/file docs-path)))]
+      (println "Encontrado(s)" (count files) "arquivo(s) de documentação")
+      files)))
 
 (defn- get-file-content
   "Lê o conteúdo completo de um arquivo, retornando string vazia em caso de erro"
@@ -40,16 +45,16 @@
       (println "Aviso: Nenhum arquivo de documentação encontrado em" docs-path)
       (doseq [file doc-files]
         (println "Arquivo encontrado:" file)))
-    
+
     (let [all-chunks (mapcat doc/extract-text doc-files)
           processed-chunks (doc/preprocess-chunks all-chunks)]
       (println (str "Processando " (count processed-chunks) " chunks de texto..."))
-      
+
       (when (and (seq processed-chunks) (< (count processed-chunks) 5))
         (println "DEBUG - Primeiros chunks:")
         (doseq [chunk (take 5 processed-chunks)]
           (println (str "Chunk: '" (subs chunk 0 (min 50 (count chunk))) "...'"))))
-      
+
       (let [embeddings (emb/create-embeddings processed-chunks)]
         {:chunks processed-chunks
          :embeddings embeddings
@@ -60,31 +65,31 @@
    Recupera contexto relevante da base de conhecimento e gera uma resposta usando LLM"
   [knowledge-base query]
   (println "DEBUG - Processando query:" query)
-  (if (and (seq (:chunks knowledge-base)) 
+  (if (and (seq (:chunks knowledge-base))
            (seq (:embeddings knowledge-base)))
     (let [query-emb (first (emb/create-embeddings [query]))
-          similar-idxs (emb/similarity-search query-emb 
-                                           (:embeddings knowledge-base)
-                                           3)
+          similar-idxs (emb/similarity-search query-emb
+                                              (:embeddings knowledge-base)
+                                              3)
           _ (println "DEBUG - Índices similares:" similar-idxs)
-          
+
           ;; Obter contexto relevante
           context-chunks (->> similar-idxs
                               (map #(nth (:chunks knowledge-base) %))
                               (str/join "\n\n"))
-          
+
           ;; Se não houver chunks relevantes, use o conteúdo original
           context (if (str/blank? context-chunks)
                     (if (seq (:original-files knowledge-base))
                       (get-file-content (first (:original-files knowledge-base)))
                       "Não foi possível encontrar informações relevantes.")
                     context-chunks)]
-      
+
       (println "DEBUG - Tamanho do contexto:" (count context) "caracteres")
-      (when (> (count context) 0)
-        (println "DEBUG - Amostra do contexto:" 
+      (when (pos? (count context))
+        (println "DEBUG - Amostra do contexto:"
                  (subs context 0 (min 200 (count context))) "..."))
-      
+
       ;; Gerar resposta usando o LLM
       (llm/generate-response query context))
     "Não foi possível encontrar informações relevantes na base de conhecimento."))
@@ -93,55 +98,55 @@
   "Processa uma consulta usando PostgreSQL com pgvector para busca semântica"
   [query]
   (println "DEBUG - Processando query no PostgreSQL:" query)
-  
+
   ;; Verificamos primeiro se é uma consulta relacionada a JWT
   (let [lower-query (str/lower-case query)
         jwt-keywords ["jwt" "token" "autenticação" "auth" "json web token"]]
-    
+
     ;; Se for relacionada a JWT, usamos uma abordagem específica primeiro
     (if (some #(str/includes? lower-query %) jwt-keywords)
       ;; Tentativa específica para consultas JWT
       (let [_ (println "DEBUG - Detectada consulta relacionada a JWT, usando busca especial")
             conn (jdbc/get-connection pg/db-spec)
             docs (try
-                   (jdbc/execute! 
-                     conn 
-                     ["SELECT id, titulo, conteudo, categoria FROM documentos WHERE LOWER(conteudo) LIKE ? LIMIT 10"
-                      "%jwt%"]
-                     {:builder-fn rs/as-unqualified-maps})
+                   (jdbc/execute!
+                    conn
+                    ["SELECT id, titulo, conteudo, categoria FROM documentos WHERE LOWER(conteudo) LIKE ? LIMIT 10"
+                     "%jwt%"]
+                    {:builder-fn rs/as-unqualified-maps})
                    (finally (.close conn)))]
-        
+
         (if (seq docs)
           ;; Se encontrou documentos relacionados a JWT, use-os como contexto
           (let [context (->> docs
-                           (map :conteudo)
-                           (str/join "\n\n"))]
+                             (map :conteudo)
+                             (str/join "\n\n"))]
             (println "DEBUG - Encontrados" (count docs) "documentos relacionados a JWT")
             (llm/generate-response query context))
-          
+
           ;; Se não encontrou por busca direta, tenta a busca semântica normal
           (let [_ (println "DEBUG - Nenhum resultado direto para JWT, tentando busca semântica")
                 results (pg/semantic-search query 5)]
             (if (seq results)
               (let [;; Extrair contexto dos resultados
                     context (->> results
-                               (map :conteudo)
-                               (str/join "\n\n"))]
+                                 (map :conteudo)
+                                 (str/join "\n\n"))]
                 (println "DEBUG - Resultados encontrados:" (count results))
                 (llm/generate-response query context))
               "Não foi possível encontrar informações sobre JWT na base de conhecimento."))))
-      
+
       ;; Para consultas não relacionadas a JWT, usamos o fluxo normal
       (let [results (pg/semantic-search query 5)]
         (if (seq results)
           (let [;; Extrair contexto dos resultados
                 context (->> results
-                           (map :conteudo)
-                           (str/join "\n\n"))]
+                             (map :conteudo)
+                             (str/join "\n\n"))]
             (println "DEBUG - Resultados encontrados:" (count results))
             (println "DEBUG - Tamanho do contexto:" (count context) "caracteres")
-            (when (> (count context) 0)
-              (println "DEBUG - Amostra do contexto:" 
+            (when (pos? (count context))
+              (println "DEBUG - Amostra do contexto:"
                        (subs context 0 (min 200 (count context))) "..."))
             (llm/generate-response query context))
           "Não foi possível encontrar informações relevantes na base de conhecimento.")))))
@@ -155,18 +160,18 @@
         need-agents (agents/needs-agent-workflow? query)
         _ (when need-agents
             (println "DEBUG - Consulta identificada como complexa, usando workflow com agentes"))
-        
+
         ;; Escolher o processamento adequado
         response (if need-agents
                    (agents/process-with-agents query)
                    (adv-rag/advanced-rag-query query))
-        
+
         end-time (System/currentTimeMillis)
         latency (- end-time start-time)]
-    
+
     ;; Registrar métricas
     (metrics/log-rag-interaction query [] response latency)
-    
+
     ;; Avaliar qualidade da resposta (apenas para monitoramento)
     (future
       (try
@@ -176,7 +181,7 @@
             (println "Score de qualidade da resposta:" (:faithfulness quality-score))))
         (catch Exception e
           (println "Erro ao avaliar qualidade da resposta:" (.getMessage e)))))
-    
+
     response))
 
 (defn import-docs-to-postgres
@@ -251,7 +256,7 @@
   (let [dir-path (first args)]
     (if (and dir-path (.isDirectory (io/file dir-path)))
       (let [files (->> (file-seq (io/file dir-path))
-                      (filter #(.isFile %)))]
+                       (filter #(.isFile %)))]
         (println "Importando" (count files) "arquivos do diretório:" dir-path)
         (doseq [file files]
           (println "Processando:" (.getName file))
@@ -333,9 +338,9 @@
         end-date (java.util.Date.)
         start-date (-> (java.util.Calendar/getInstance)
                        (doto (.setTime end-date)
-                             (.add java.util.Calendar/DAY_OF_MONTH (- days)))
+                         (.add java.util.Calendar/DAY_OF_MONTH (- days)))
                        (.getTime))]
-    
+
     (println "Calculando métricas dos últimos" days "dias...")
     (let [metrics (metrics/calculate-rag-metrics start-date end-date)]
       (if metrics
@@ -372,13 +377,13 @@
   "Configura todo o sistema DocAI na inicialização"
   []
   (println "Configurando o sistema DocAI...")
-  
+
   ;; Verificar e configurar PostgreSQL
   (when (pg/check-postgres-connection)
     (pg/setup-pg-rag!)
     (metrics/setup-metrics-tables!)
     (agents/setup-agent-tables!))
-  
+
   (println "Sistema DocAI configurado com sucesso!"))
 
 (defn -main
@@ -386,7 +391,7 @@
   [& args]
   ;; Inicializar o sistema
   (setup-system)
-  
+
   (let [command (first args)
         rest-args (rest args)]
     (case command
@@ -404,11 +409,11 @@
       "--clean" (clean-data)
       "--metrics" (show-metrics rest-args)
       "--feedback" (provide-feedback rest-args)
-      
+
       ;; Novos comandos para chunking dinâmico
       "--process-dynamic" (process-file-dynamic rest-args)
       "--import-dynamic" (process-dir-dynamic rest-args)
-      
+
       ;; Default
       (if (seq args)
         (println "Comando desconhecido:" command "\nUse --help para ver os comandos disponíveis.")
