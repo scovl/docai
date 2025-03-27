@@ -1,7 +1,8 @@
 (ns docai.document
   (:require [markdown-to-hiccup.core :as md]
             [hickory.core :as html]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [docai.advanced-rag :as adv-rag]))
 
 (defn extract-text-from-markdown
   "Extrai texto de conteúdo Markdown"
@@ -93,25 +94,10 @@
       (println "Erro ao ler documento:" (.getMessage e))
       "")))
 
-(defn process-with-dynamic-chunking
-  "Processa um documento com chunking dinâmico"
-  [file-path]
-  (let [content (read-document file-path)
-        document-type (detect-document-type file-path content)
-        doc-id (str (java.util.UUID/randomUUID))]
-    
-    (println "Processando arquivo" file-path "como documento tipo" document-type)
-    
-    ;; Usar a função de processamento dinâmico de docai.advanced-rag
-    (try
-      (require '[docai.advanced-rag :as adv-rag])
-      (let [chunks-count ((resolve 'docai.advanced-rag/process-document-with-dynamic-chunking!) 
-                          doc-id content document-type)]
-        (println "✅ Documento processado com" chunks-count "chunks."))
-      (catch Exception e
-        (println "❌ Erro ao processar documento com chunking dinâmico:" (.getMessage e))))))
+;; Declarar process-with-dynamic-chunking para evitar erros de referência forward
+(declare process-with-dynamic-chunking)
 
-;; Adicionar função para processamento em lote de documentos
+;; Função para processamento em lote de documentos
 (defn process-directory-with-dynamic-chunking
   "Processa recursivamente todos os documentos em um diretório usando chunking dinâmico"
   [dir-path]
@@ -132,4 +118,28 @@
         (let [end-time (System/currentTimeMillis)
               duration (/ (- end-time start-time) 1000.0)]
           (println (str "✅ Processamento concluído: " @file-count " arquivos em " duration " segundos."))))
-      (println "❌ Caminho fornecido não é um diretório:" dir-path)))) 
+      (println "❌ Caminho fornecido não é um diretório:" dir-path))))
+
+(defn process-with-dynamic-chunking
+  "Processa um documento com chunking dinâmico"
+  [file-path]
+  (let [file (java.io.File. file-path)]
+    (if (.isDirectory file)
+      ;; Se for um diretório, processá-lo recursivamente
+      (do
+        (println "Processando diretório:" file-path)
+        (process-directory-with-dynamic-chunking file-path))
+      ;; Se for um arquivo, processar como documento
+      (let [content (read-document file-path)
+            document-type (detect-document-type file-path content)
+            doc-id (str (java.util.UUID/randomUUID))]
+        
+        (println "Processando arquivo" file-path "como documento tipo" document-type)
+        
+        ;; Usar a função de processamento dinâmico de docai.advanced-rag
+        (try
+          (let [chunks-count (adv-rag/process-document-with-dynamic-chunking! 
+                              doc-id content document-type)]
+            (println "✅ Documento processado com" chunks-count "chunks."))
+          (catch Exception e
+            (println "❌ Erro ao processar documento com chunking dinâmico:" (.getMessage e)))))))) 
