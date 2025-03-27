@@ -4,12 +4,16 @@
 ;; Implementação de embeddings usando TF-IDF simples
 ;; Não depende de modelos externos, ao contrário do Ollama que usa o deepseek-r1 para o LLM
 
+(defn extract-keywords
+  "Extrai palavras-chave de um texto para indexação"
+  [text]
+  (filter #(> (count %) 2) (str/split (str/lower-case text) #"\s+")))
+
 (defn tokenize
   "Divide o texto em tokens, removendo palavras com menos de 3 caracteres"
   [text]
   (when (string? text)
-    (->> (str/split (str/lower-case text) #"\s+")
-         (filter #(> (count %) 2)))))
+    (filter #(> (count %) 2) (str/split (str/lower-case text) #"\s+"))))
 
 (defn term-freq
   "Calcula a frequência dos termos em um documento"
@@ -21,7 +25,7 @@
   [docs]
   (let [string-docs (filter string? docs)
         _ (println (str "Processando " (count string-docs) " documentos válidos de " (count docs) " total"))
-        doc-tokens (map tokenize string-docs)  
+        doc-tokens (map tokenize string-docs)
         all-tokens (distinct (flatten doc-tokens))
         doc-count (count string-docs)]
     (if (zero? doc-count)
@@ -82,9 +86,9 @@
   [query-embedding doc-embeddings n]
   (if (or (empty? query-embedding) (empty? doc-embeddings))
     (take (min n (count doc-embeddings)) (range))
-    (->> (map-indexed (fn [idx doc-emb] 
+    (->> (map-indexed (fn [idx doc-emb]
                         [(cosine-similarity query-embedding doc-emb) idx])
                       doc-embeddings)
          (sort-by first >)
          (take n)
-         (map second)))) 
+         (map second))))
