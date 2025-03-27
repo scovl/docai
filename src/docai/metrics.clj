@@ -1,9 +1,9 @@
 (ns docai.metrics
-  (:require [clojure.string :as str]
-            [clojure.data.json :as json]
+  (:require [clojure.data.json :as json]
             [next.jdbc :as jdbc]
             [docai.pg :as pg]
-            [docai.llm :as llm]))
+            [docai.llm :as llm]
+            [clojure.string :as str]))
 
 ;; Tabela para logs de interações RAG
 (def rag-logs-table "CREATE TABLE IF NOT EXISTS rag_logs (
@@ -98,7 +98,8 @@
     false))
 
 (defn calculate-rag-metrics
-  "Calcula métricas de desempenho para um período"
+  "Calcula métricas de desempenho para um período.
+   Documentada em rag02.md como parte essencial do sistema de monitoramento."
   [start-date end-date]
   (if (pg/check-postgres-connection)
     (let [conn (jdbc/get-connection pg/db-spec)]
@@ -151,7 +152,8 @@
       "Erro na avaliação. Score padrão: 5/10.")))
 
 (defn evaluate-response-quality
-  "Avalia métricas qualitativas de uma resposta RAG usando LLM"
+  "Avalia métricas qualitativas de uma resposta RAG usando LLM.
+   Esta função implementa avaliação automatizada de qualidade para monitoramento contínuo."
   [query context response]
   (let [;; Construir prompt para avaliação de fidelidade
         prompt-faithfulness (str "Você é um avaliador especializado em sistemas RAG. "
@@ -166,16 +168,42 @@
                               "Atribua uma pontuação de 1 a 10, onde 10 significa perfeita fidelidade ao contexto.")
         
         ;; Chamar LLM para avaliação
-        faithfulness-result (call-evaluation-llm prompt-faithfulness)]
-    
-    ;; Extrair score numérico (implementação simplificada)
-    (let [score-pattern #"(\d+)(?:\.\d+)?"
-          matches (re-find score-pattern faithfulness-result)
-          score (if matches
-                  (try
-                    (Integer/parseInt (second matches))
-                    (catch Exception _ 5))
-                  5)]
+        faithfulness-result (call-evaluation-llm prompt-faithfulness)
+        
+        ;; Extrair score numérico (implementação simplificada)
+        score-pattern #"(\d+)(?:\.\d+)?"
+        matches (re-find score-pattern faithfulness-result)
+        score (if matches
+                (try
+                  (Integer/parseInt (second matches))
+                  (catch Exception _ 5))
+                5)]
       
       {:faithfulness score
-       :evaluation faithfulness-result}))) 
+       :evaluation faithfulness-result}))
+
+;; Adicionar uma função para coletar feedback de usuário via console
+(defn collect-user-feedback
+  "Coleta feedback diretamente do usuário para uma consulta específica"
+  [query-id]
+  (println "\n=== Feedback para a consulta ===")
+  (println "Como você avalia a resposta? (positivo/negativo/neutro)")
+  (print "Avaliação: ")
+  (flush)
+  (let [feedback-type (str/lower-case (or (read-line) "neutro"))]
+    ;; Validar entrada
+    (if (contains? #{"positivo" "negativo" "neutro"} feedback-type)
+      (do
+        (println "Comentários adicionais (opcional):")
+        (print "> ")
+        (flush)
+        (let [feedback-text (read-line)
+              ;; Padronizar tipos de feedback para o formato do banco
+              db-feedback-type (case feedback-type
+                                "positivo" "positive"
+                                "negativo" "negative"
+                                "neutro" "neutral")]
+          (if (process-user-feedback query-id db-feedback-type feedback-text)
+            (println "✅ Feedback registrado com sucesso!")
+            (println "❌ Não foi possível registrar o feedback."))))
+      (println "❌ Tipo de feedback inválido. Use 'positivo', 'negativo' ou 'neutro'.")))) 
