@@ -14,6 +14,7 @@ function show_help {
     echo "Opções:"
     echo "  memory        Executa DocAI no modo memória (TF-IDF)"
     echo "  postgres      Executa DocAI no modo PostgreSQL"
+    echo "  advanced      Executa DocAI no modo RAG avançado com agentes"
     echo "  setup         Configura o ambiente (inicia Podman, baixa modelos)"
     echo "  podman-start  Inicia os containers Podman necessários"
     echo "  podman_start  Inicia os containers Podman necessários (alternativo)"
@@ -65,19 +66,53 @@ function setup_environment {
     # Verificar modelos
     check_model "deepseek-r1"
     
-    # Iniciar Podman se modo PostgreSQL
-    if [ "$1" == "postgres" ]; then
+    # Verificar modelo de embeddings para modos avançados
+    if [ "$1" == "postgres" ] || [ "$1" == "advanced" ]; then
+        check_model "nomic-embed-text"
+    fi
+    
+    # Iniciar Podman se modo PostgreSQL ou avançado
+    if [ "$1" == "postgres" ] || [ "$1" == "advanced" ]; then
         if check_podman; then
-            echo "⏳ Iniciando containers Podman..."
+            echo "⏳ Reiniciando containers Podman..."
+            podman-compose down
             podman-compose up -d
             
-            echo "⏳ Esperando os serviços iniciarem..."
-            sleep 5
+            echo "⏳ Esperando os serviços iniciarem (20 segundos)..."
+            sleep 20
             
-            echo "⏳ Verificando modelo de embeddings..."
-            podman-compose exec -T ollama ollama list | grep -q "nomic-embed-text" || podman-compose exec -T ollama ollama pull nomic-embed-text
+            echo "⏳ Verificando modelos no conteiner Ollama..."
+            echo "⏳ Verificando se os modelos já estão presentes..."
+            
+            if ! podman exec pgai-ollama-1 ollama list | grep -q "nomic-embed-text"; then
+                echo "⏳ Baixando o modelo nomic-embed-text dentro do conteiner..."
+                podman exec pgai-ollama-1 ollama pull nomic-embed-text
+            else
+                echo "✅ Modelo nomic-embed-text já está disponível no conteiner"
+            fi
+            
+            if ! podman exec pgai-ollama-1 ollama list | grep -q "deepseek-r1"; then
+                echo "⏳ Baixando o modelo deepseek-r1 dentro do conteiner..."
+                podman exec pgai-ollama-1 ollama pull deepseek-r1
+            else
+                echo "✅ Modelo deepseek-r1 já está disponível no conteiner"
+            fi
+            
+            echo "⏳ Verificando conectividade entre conteineres..."
+            podman exec pgai-db-1 pg_isready -h localhost -p 5432 -U postgres
+            if [ $? -ne 0 ]; then
+                echo "⚠️ Conteiner PostgreSQL não está pronto. Esperando mais 10 segundos..."
+                sleep 10
+            fi
+            
+            echo "⏳ Verificando se o conteiner Ollama está respondendo..."
+            podman exec pgai-ollama-1 ollama list > /dev/null
+            if [ $? -ne 0 ]; then
+                echo "⚠️ Conteiner Ollama não está respondendo. Esperando mais 10 segundos..."
+                sleep 10
+            fi
         else
-            echo "❌ Não é possível iniciar o modo PostgreSQL sem o Podman."
+            echo "❌ Não é possível iniciar o modo PostgreSQL/avançado sem o Podman."
             exit 1
         fi
     fi
@@ -103,6 +138,11 @@ case "$1" in
         echo "🚀 Iniciando DocAI no modo PostgreSQL..."
         lein run --postgres
         ;;
+    advanced)
+        setup_environment "advanced"
+        echo "🚀 Iniciando DocAI no modo RAG avançado com agentes..."
+        lein run --advanced
+        ;;
     setup)
         setup_environment
         echo "✅ Setup concluído!"
@@ -111,7 +151,25 @@ case "$1" in
         if check_podman; then
             echo "⏳ Iniciando containers Podman..."
             podman-compose up -d
-            echo "✅ Containers iniciados!"
+            echo "⏳ Esperando serviços iniciarem (15 segundos)..."
+            sleep 15
+            echo "⏳ Baixando modelos nos containers..."
+            
+            if ! podman exec -i pgai-ollama-1 ollama list | grep -q "nomic-embed-text"; then
+                echo "⏳ Baixando o modelo nomic-embed-text dentro do conteiner..."
+                podman exec -i pgai-ollama-1 ollama pull nomic-embed-text > /dev/null 2>&1
+            else
+                echo "✅ Modelo nomic-embed-text já está disponível no conteiner"
+            fi
+            
+            if ! podman exec -i pgai-ollama-1 ollama list | grep -q "deepseek-r1"; then
+                echo "⏳ Baixando o modelo deepseek-r1 dentro do conteiner..."
+                podman exec -i pgai-ollama-1 ollama pull deepseek-r1 > /dev/null 2>&1
+            else
+                echo "✅ Modelo deepseek-r1 já está disponível no conteiner"
+            fi
+            
+            echo "✅ Containers iniciados e modelos baixados!"
         else
             exit 1
         fi
