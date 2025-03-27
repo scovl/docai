@@ -27,14 +27,14 @@
           embedding-sql "SELECT ai.ollama_embed('nomic-embed-text', ?) AS embedding"
           result (try
                    (jdbc/execute-one! conn [embedding-sql text]
-                                     {:builder-fn rs/as-unqualified-maps})
+                                      {:builder-fn rs/as-unqualified-maps})
                    (catch Exception e
                      (println "Erro ao gerar embedding:" (.getMessage e))
                      nil))
           embedding (:embedding result)]
       (.close conn)
       (when embedding
-        (swap! embedding-cache 
+        (swap! embedding-cache
                (fn [cache]
                  (let [updated-cache (assoc cache text embedding)]
                    ;; Limitar tamanho do cache
@@ -47,11 +47,11 @@
   "Executa consulta RAG com cache ou armazena o resultado no cache"
   [query response]
   ;; Armazenar no cache apenas para consultas não-pessoais
-  (when (not (personal-query? query))
-    (swap! response-cache 
+  (when-not (personal-query? query)
+    (swap! response-cache
            (fn [cache]
              (let [updated-cache (assoc cache query {:response response
-                                                    :timestamp (System/currentTimeMillis)})]
+                                                     :timestamp (System/currentTimeMillis)})]
                ;; Limitar tamanho do cache
                (if (> (count updated-cache) max-cache-size)
                  (into {} (take max-cache-size updated-cache))
@@ -65,18 +65,18 @@
   (let [;; Verificar cache primeiro
         cached (get @response-cache query)
         current-time (System/currentTimeMillis)]
-    
+
     (if (and cached (< (- current-time (:timestamp cached)) (* cache-ttl 1000)))
       ;; Retornar do cache se disponível e não expirado
       (:response cached)
-      
+
       ;; Caso contrário, processar a consulta
       (let [;; Analisar complexidade da consulta
             query-complexity (analyze-query-complexity query)
             start-time (System/currentTimeMillis)]
-        
+
         (println "Complexidade da consulta:" query-complexity)
-        
+
         (let [;; Usar busca semântica com chunking dinâmico
               docs (dynamic-semantic-search query 5)
               ;; Fallback para busca semântica padrão se não houver resultados dinâmicos
@@ -84,17 +84,17 @@
                            docs
                            (advanced-semantic-search query 5))
               context (->> final-docs
-                         (map :content)
-                         (str/join "\n\n"))
+                           (map :content)
+                           (str/join "\n\n"))
               prompt (llm/format-prompt context query)
               response (llm/call-ollama-api prompt)
-              
+
               ;; Calcular tempo total
               total-time (- (System/currentTimeMillis) start-time)]
-          
+
           ;; Log para análise
           (println "Consulta processada em" total-time "ms")
-          
+
           ;; Atualizar cache usando a função auxiliar
           (cached-rag-query query response))))))
 
@@ -169,12 +169,12 @@
         chunking-params (adaptive-chunking-strategy document-type)
         ;; Aplicar chunking dinâmico
         chunks (recursive-text-splitter content chunking-params)]
-    
+
     (println "Documento " document-id " dividido em " (count chunks) " chunks usando estratégia para tipo " document-type)
-    
+
     ;; Retornar chunks com metadados
-    (map-indexed 
-     (fn [idx chunk] 
+    (map-indexed
+     (fn [idx chunk]
        {:document_id document-id
         :chunk_id (str document-id "-" idx)
         :content chunk
@@ -192,16 +192,16 @@
         chunk-size (:chunk-size chunking-params)
         table-name (str "documentos_embeddings_" document-type)
         conn (jdbc/get-connection pg/db-spec)]
-    
+
     (try
       ;; Tentar criar a tabela de embeddings
-      (jdbc/execute! 
+      (jdbc/execute!
        conn
        [(str "CREATE TABLE IF NOT EXISTS " table-name " (
               id TEXT PRIMARY KEY,
               embedding VECTOR(768)
             )")])
-      
+
       ;; Configurar vectorizer com chunking adaptativo
       (jdbc/execute!
        conn
@@ -215,13 +215,13 @@
              "  RETURN NEW;\n"
              "END;\n"
              "$$ LANGUAGE plpgsql;")])
-      
+
       ;; Criar o trigger
       (jdbc/execute!
        conn
        [(str "DROP TRIGGER IF EXISTS vectorize_" document-type " ON documentos;")]
        {:return-keys false})
-      
+
       (jdbc/execute!
        conn
        [(str "CREATE TRIGGER vectorize_" document-type "\n"
@@ -230,7 +230,7 @@
              "WHEN (NEW.categoria = '" document-type "')\n"
              "EXECUTE FUNCTION ai.vectorize_" document-type "();")]
        {:return-keys false})
-      
+
       (println "✅ Vectorizer para documentos tipo" document-type "configurado com sucesso!\n"
                "   Usando chunk_size:" chunk-size)
       (catch Exception e
@@ -245,7 +245,7 @@
   (let [;; Gerar chunks usando chunking dinâmico
         chunks (dynamic-chunk-document document-id content document-type)
         conn (jdbc/get-connection pg/db-spec)
-        
+
         ;; Verificar se a tabela de chunks existe, criar se necessário
         _ (try
             (jdbc/execute! conn ["CREATE TABLE IF NOT EXISTS document_chunks (
@@ -261,7 +261,7 @@
                                )"])
             (catch Exception e
               (println "Aviso: Erro ao criar tabela de chunks:" (.getMessage e))))]
-    
+
     ;; Inserir cada chunk no banco
     (doseq [chunk chunks]
       (try
@@ -269,27 +269,27 @@
                              (document_id, chunk_id, content, chunk_type, chunk_index, total_chunks)
                              VALUES (?, ?, ?, ?, ?, ?)
                              ON CONFLICT (chunk_id) DO NOTHING"
-                           (:document_id chunk)
-                           (:chunk_id chunk)
-                           (:content chunk)
-                           (:chunk_type chunk)
-                           (:chunk_index chunk)
-                           (:total_chunks chunk)])
+                             (:document_id chunk)
+                             (:chunk_id chunk)
+                             (:content chunk)
+                             (:chunk_type chunk)
+                             (:chunk_index chunk)
+                             (:total_chunks chunk)])
         (catch Exception e
           (println "Erro ao inserir chunk" (:chunk_id chunk) ":" (.getMessage e)))))
-    
+
     ;; Gerar embeddings para os novos chunks
     (println "Gerando embeddings para chunks do documento" document-id "...")
     (try
       (jdbc/execute! conn ["UPDATE document_chunks 
                            SET embedding = ai.ollama_embed('nomic-embed-text', content) 
                            WHERE document_id = ? AND embedding IS NULL"
-                         document-id])
+                           document-id])
       (catch Exception e
         (println "Erro ao gerar embeddings:" (.getMessage e))))
-    
+
     (.close conn)
-    
+
     (println "✅ Documento" document-id "processado com chunking dinâmico e armazenado com sucesso.")
     (count chunks)))
 
@@ -300,11 +300,11 @@
   (let [conn (jdbc/get-connection pg/db-spec)
         ;; Gerar embedding para a consulta
         query-embedding (cached-embedding query pg/db-spec)
-        
+
         ;; Buscar chunks mais próximos
         results (when query-embedding
                   (try
-                    (jdbc/execute! 
+                    (jdbc/execute!
                      conn
                      ["SELECT 
                        c.document_id,
@@ -325,7 +325,7 @@
                     (catch Exception e
                       (println "Erro na busca semântica dinâmica:" (.getMessage e))
                       [])))]
-    
+
     (.close conn)
     results))
 
@@ -334,34 +334,34 @@
   "Re-classifica resultados usando scoring avançado"
   [query initial-results]
   (let [;; Calcular scores mais sofisticados para cada resultado
-        results-with-scores (map 
+        results-with-scores (map
                              (fn [doc]
                                (let [;; Combina múltiplos fatores na pontuação
                                      ;; 1. Distância original de embedding (já temos)
                                      emb-score (:distancia doc)
-                                     
+
                                      ;; 2. Correspondência de palavras-chave
                                      query-words (-> query
-                                                   str/lower-case
-                                                   (str/split #"\s+")
-                                                   set)
+                                                     str/lower-case
+                                                     (str/split #"\s+")
+                                                     set)
                                      content-lower (str/lower-case (:conteudo doc))
                                      keyword-matches (count (filter #(str/includes? content-lower %) query-words))
                                      keyword-score (/ keyword-matches (max 1 (count query-words)))
-                                     
+
                                      ;; 3. Comprimento do documento (preferência para respostas mais concisas)
                                      length-factor (Math/max 0.5 (Math/min 1.0 (/ 2000.0 (count (:conteudo doc)))))
-                                     
+
                                      ;; Score combinado (quanto menor, melhor)
                                      combined-score (+ (* 0.6 emb-score)
-                                                      (* -0.3 keyword-score) ;; Negativo porque queremos maximizar correspondências
-                                                      (* 0.1 (- 1.0 length-factor)))]
+                                                       (* -0.3 keyword-score) ;; Negativo porque queremos maximizar correspondências
+                                                       (* 0.1 (- 1.0 length-factor)))]
                                  (assoc doc :relevance_score combined-score)))
                              initial-results)
-        
+
         ;; Ordenar por score combinado (do menor para o maior)
         reranked-results (sort-by :relevance_score results-with-scores)]
-    
+
     reranked-results))
 
 ;; Busca semântica avançada com reranking
@@ -371,7 +371,7 @@
   (let [conn (jdbc/get-connection pg/db-spec)
         ;; Etapa 1: Recuperação inicial usando embeddings
         initial-results (try
-                          (jdbc/execute! 
+                          (jdbc/execute!
                            conn
                            ["WITH query_embedding AS (
                               SELECT ai.ollama_embed('nomic-embed-text', ?) AS embedding
@@ -391,14 +391,14 @@
                           (catch Exception e
                             (println "Erro na busca inicial:" (.getMessage e))
                             []))
-        
+
         ;; Etapa 2: Re-ranqueamento para melhorar precisão
         reranked-results (if (> (count initial-results) 1)
                            (rerank-results query initial-results)
                            initial-results)]
-    
+
     (.close conn)
-    
+
     ;; Retornar apenas o número solicitado de resultados
     (take limit reranked-results)))
 
@@ -411,7 +411,7 @@
         complex-patterns ["como" "explique" "compare" "diferença entre" "quando devo"
                           "melhor maneira" "vantagens e desvantagens" "pros e contras"]
         ;; Padrões que indicam necessidade de dados estruturados
-        structured-patterns ["tabela" "lista" "valor" "número" "quantidade" 
+        structured-patterns ["tabela" "lista" "valor" "número" "quantidade"
                              "estatística" "percentual" "quanto" "valores"]]
     (cond
       (some #(str/includes? lower-query %) complex-patterns) :complex
@@ -422,14 +422,14 @@
   "Configura o ambiente para RAG avançado"
   []
   (println "Configurando ambiente para RAG avançado...")
-  
+
   ;; Verificar se o PostgreSQL está acessível
   (if (pg/check-postgres-connection)
     (do
       ;; Configurar vectorizadores para diferentes tipos de documentos
       (create-vectorizer-with-adaptive-chunking! "article")
       (create-vectorizer-with-adaptive-chunking! "code")
-      
+
       ;; Criar tabela para chunks dinâmicos
       (let [conn (jdbc/get-connection pg/db-spec)]
         (try
@@ -448,7 +448,7 @@
           (catch Exception e
             (println "⚠️ Erro ao criar tabela de chunks dinâmicos:" (.getMessage e))))
         (.close conn))
-      
+
       ;; Iniciar limpeza periódica de cache
       (future
         (while true
@@ -457,6 +457,6 @@
             (catch Exception e
               (println "Erro na limpeza do cache:" (.getMessage e))))
           (Thread/sleep (* 60 60 1000)))) ;; Executar a cada hora
-      
+
       (println "✅ RAG avançado configurado com sucesso!"))
-    (println "❌ Falha na configuração do RAG avançado: PostgreSQL não acessível"))) 
+    (println "❌ Falha na configuração do RAG avançado: PostgreSQL não acessível")))
