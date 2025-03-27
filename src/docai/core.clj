@@ -5,12 +5,15 @@
             [docai.embedding :as emb]
             [docai.llm :as llm]
             [docai.pg :as pg]
+            [docai.advanced-rag :as adv-rag]
+            [docai.metrics :as metrics]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:gen-class))
 
 (def ^:private docs-path "resources/docs")
 (def ^:private use-postgres (atom false))
+(def ^:private use-advanced-rag (atom false))
 
 (defn- load-documentation
   "Carrega todos os arquivos de documentação do diretório configurado"
@@ -142,6 +145,20 @@
             (llm/generate-response query context))
           "Não foi possível encontrar informações relevantes na base de conhecimento.")))))
 
+(defn query-advanced-rag
+  "Processa uma consulta usando o pipeline RAG avançado"
+  [query]
+  (println "DEBUG - Processando query com RAG avançado:" query)
+  (let [start-time (System/currentTimeMillis)
+        response (adv-rag/advanced-rag-query query)
+        end-time (System/currentTimeMillis)
+        latency (- end-time start-time)]
+    
+    ;; Registrar métricas
+    (metrics/log-rag-interaction query [] response latency)
+    
+    response))
+
 (defn import-docs-to-postgres
   "Importa documentos para o PostgreSQL"
   []
@@ -152,61 +169,165 @@
       (doseq [file doc-files]
         (pg/import-markdown-file! file "documentacao")))))
 
-(defn -main
-  "Função principal que inicializa a aplicação DocAI e processa consultas do usuário"
-  [& args]
-  (println "Inicializando DocAI...")
+(defn process-file-dynamic
+  "Processa um único arquivo com chunking dinâmico"
+  [args]
+  (let [file-path (first args)]
+    (if (and file-path (.isFile (io/file file-path)))
+      (do
+        (println "Processando arquivo com chunking dinâmico:" file-path)
+        (require '[docai.document :as doc])
+        ((resolve 'docai.document/process-with-dynamic-chunking) file-path))
+      (println "Arquivo inválido ou não encontrado:" file-path))))
 
-  ;; Verificar argumentos de linha de comando
-  (when (some #{"--postgres"} args)
-    (reset! use-postgres true)
-    (println "Modo PostgreSQL ativado!"))
+(defn process-dir-dynamic
+  "Processa um diretório completo com chunking dinâmico"
+  [args]
+  (let [dir-path (first args)]
+    (if (and dir-path (.isDirectory (io/file dir-path)))
+      (do
+        (println "Processando diretório com chunking dinâmico:" dir-path)
+        (require '[docai.document :as doc])
+        ((resolve 'docai.document/process-directory-with-dynamic-chunking) dir-path))
+      (println "Diretório inválido ou não encontrado:" dir-path))))
+
+(defn display-help
+  "Exibe a ajuda do sistema"
+  []
+  (println "
+DocAI - Sistema de RAG Avançado
+
+Comandos disponíveis:
+  --help                   Exibe esta ajuda
+  --version                Exibe a versão do sistema
+  --process <arquivo>      Processa um único arquivo
+  --import <diretório>     Importa todos os documentos de um diretório
+  --postgres               Inicia o sistema com suporte a PostgreSQL
+  --advanced               Inicia o sistema com RAG avançado
+  --search <consulta>      Realiza uma busca com a consulta fornecida
+  --clean                  Limpa dados temporários
   
-  ;; Verificar se o Ollama está acessível
-  (println "ℹ️ Para usar o Ollama, certifique-se de que ele está em execução com o comando: ollama serve")
-  (println "ℹ️ Usando o modelo deepseek-r1. Se você ainda não o baixou, execute: ollama pull deepseek-r1")
-  
-  (if @use-postgres
-    ;; Setup PostgreSQL RAG
-    (do
-      (println "Configurando ambiente PostgreSQL para RAG...")
-      ;; Configurar Ollama para usar o endereço do container
-      (llm/set-ollama-docker-mode!)
-      (pg/setup-pg-rag!)
-      (import-docs-to-postgres)
-      (println "PostgreSQL RAG pronto! Faça sua pergunta:")
-      (try
-        (loop []
-          (when-let [input (read-line)]
-            (if (= input "sair")
-              (println "Obrigado por usar o DocAI. Até a próxima!")
-              (do
-                (println "Processando...")
-                (println (query-pg-rag input))
-                (println "\nPróxima pergunta (ou 'sair' para terminar):")
-                (recur)))))
-        (catch Exception e
-          (println "Erro: " (.getMessage e))
-          (println "Detalhes: " (ex-data e))
-          (println "Obrigado por usar o DocAI. Até a próxima!"))))
-    
-    ;; Setup tradicional em memória
-    (let [kb (setup-knowledge-base)]
-      (println "Base de conhecimento pronta! Faça sua pergunta:")
-      (try
-        (loop []
-          (when-let [input (read-line)]
-            (if (= input "sair")
-              (println "Obrigado por usar o DocAI. Até a próxima!")
-              (do
-                (println "Processando...")
-                (println (query-rag kb input))
-                (println "\nPróxima pergunta (ou 'sair' para terminar):")
-                (recur)))))
-        (catch Exception e
-          (println "Erro: " (.getMessage e))
-          (println "Detalhes: " (ex-data e))
-          (println "Obrigado por usar o DocAI. Até a próxima!"))))))
+  --process-dynamic <arquivo>    Processa um arquivo com chunking dinâmico
+  --import-dynamic <diretório>   Importa diretório com chunking dinâmico
+"))
+
+(defn display-version
+  "Exibe a versão do sistema"
+  []
+  (println "DocAI v1.2.0 - Sistema de RAG Avançado com Chunking Dinâmico"))
+
+(defn process-file
+  "Processa um único arquivo"
+  [args]
+  (let [file-path (first args)]
+    (if (and file-path (.isFile (io/file file-path)))
+      (do
+        (println "Processando arquivo:" file-path)
+        (pg/import-markdown-file! file-path "documentacao"))
+      (println "Arquivo inválido ou não encontrado:" file-path))))
+
+(defn import-directory
+  "Importa todos os documentos de um diretório"
+  [args]
+  (let [dir-path (first args)]
+    (if (and dir-path (.isDirectory (io/file dir-path)))
+      (let [files (->> (file-seq (io/file dir-path))
+                      (filter #(.isFile %)))]
+        (println "Importando" (count files) "arquivos do diretório:" dir-path)
+        (doseq [file files]
+          (println "Processando:" (.getName file))
+          (pg/import-markdown-file! (.getPath file) "documentacao")))
+      (println "Diretório inválido ou não encontrado:" dir-path))))
+
+(defn search-docs
+  "Realiza uma busca com a consulta fornecida"
+  [query]
+  (println "Resultado da busca para:" query)
+  (if @use-advanced-rag
+    (println (query-advanced-rag query))
+    (if @use-postgres
+      (println (query-pg-rag query))
+      (println (query-rag (setup-knowledge-base) query)))))
+
+(defn search-cli
+  "Inicia o modo de busca interativo"
+  []
+  (println "Modo de busca interativo. Digite 'sair' para encerrar.")
+  (try
+    (loop []
+      (print "Consulta> ")
+      (flush)
+      (when-let [input (read-line)]
+        (if (= (str/lower-case input) "sair")
+          (println "Saindo do modo de busca.")
+          (do
+            (search-docs input)
+            (recur)))))
+    (catch Exception e
+      (println "Erro no modo de busca:" (.getMessage e)))))
+
+(defn run-with-postgres
+  "Inicia o sistema com suporte a PostgreSQL"
+  [args]
+  (reset! use-postgres true)
+  (println "Configurando ambiente PostgreSQL para RAG...")
+  ;; Configurar Ollama para usar o endereço do container
+  (llm/set-ollama-docker-mode!)
+  (pg/setup-pg-rag!)
+  (import-docs-to-postgres)
+  (println "PostgreSQL RAG pronto!")
+  (search-cli))
+
+(defn run-with-advanced-rag
+  "Inicia o sistema com RAG avançado"
+  [args]
+  (reset! use-postgres true)
+  (reset! use-advanced-rag true)
+  (println "Configurando ambiente PostgreSQL para RAG avançado...")
+  ;; Configurar Ollama para usar o endereço do container
+  (llm/set-ollama-docker-mode!)
+  (pg/setup-pg-rag!)
+  (metrics/setup-metrics-tables!)
+  (adv-rag/setup-advanced-rag!)
+  (import-docs-to-postgres)
+  (println "RAG avançado pronto!")
+  (search-cli))
+
+(defn clean-data
+  "Limpa dados temporários"
+  []
+  (println "Limpando caches e dados temporários...")
+  (reset! adv-rag/embedding-cache {})
+  (reset! adv-rag/response-cache {})
+  (println "Caches limpos com sucesso!"))
+
+(defn -main
+  "Função principal do DocAI"
+  [& args]
+  (let [command (first args)
+        rest-args (rest args)]
+    (case command
+      ;; Comandos existentes
+      "--help" (display-help)
+      "--version" (display-version)
+      "--process" (process-file rest-args)
+      "--import" (import-directory rest-args)
+      "--postgres" (run-with-postgres rest-args)
+      "--advanced" (run-with-advanced-rag rest-args)
+      "--search" (if (seq rest-args)
+                   (search-docs (first rest-args))
+                   (search-cli))
+      "--clean" (clean-data)
+      
+      ;; Novos comandos para chunking dinâmico
+      "--process-dynamic" (process-file-dynamic rest-args)
+      "--import-dynamic" (process-dir-dynamic rest-args)
+      
+      ;; Default
+      (if (seq args)
+        (println "Comando desconhecido:" command "\nUse --help para ver os comandos disponíveis.")
+        (search-cli))))
+  (shutdown-agents))
 
 ;; Exemplos de funções úteis para o REPL (copie e cole no REPL conforme necessário):
 ;; 
