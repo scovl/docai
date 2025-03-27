@@ -10,6 +10,7 @@ set CONTAINER_ENGINE=docker
 if "%1"=="" goto HELP
 if "%1"=="memory" goto MEMORY
 if "%1"=="postgres" goto POSTGRES
+if "%1"=="advanced" goto ADVANCED
 if "%1"=="setup" goto SETUP
 if "%1"=="docker-start" goto DOCKER_START
 if "%1"=="docker_start" goto DOCKER_START
@@ -26,6 +27,7 @@ echo.
 echo Opcoes:
 echo   memory        Executa DocAI no modo memoria (TF-IDF)
 echo   postgres      Executa DocAI no modo PostgreSQL
+echo   advanced      Executa DocAI no modo PostgreSQL com RAG avancado
 echo   setup         Configura o ambiente (inicia Docker, baixa modelos)
 echo   docker-start  Inicia os containers Docker necessarios
 echo   docker_start  Inicia os containers Docker necessarios (alternativo)
@@ -179,6 +181,63 @@ if %ERRORLEVEL% NEQ 0 goto END
 echo ... Parando containers Docker...
 docker compose -f container-compose.yml down
 echo + Containers parados!
+goto END
+
+:ADVANCED
+echo * Configurando ambiente para DocAI modo RAG avancado...
+call :CHECK_OLLAMA
+call :CHECK_MODEL deepseek-r1
+call :CHECK_MODEL nomic-embed-text
+call :CHECK_DOCKER
+
+if %ERRORLEVEL% NEQ 0 (
+    echo X Docker nao esta instalado. O modo PostgreSQL nao estara disponivel.
+    goto END
+)
+
+echo ... Reiniciando containers com Docker...
+docker compose -f container-compose.yml down
+docker compose -f container-compose.yml up -d
+
+echo ... Esperando os servicos iniciarem (20 segundos)...
+timeout /t 20 /nobreak > nul
+
+echo ... Verificando modelos no conteiner Ollama...
+echo ... Verificando se os modelos ja estao presentes...
+
+docker exec pgai-ollama-1 ollama list | findstr "nomic-embed-text" > nul
+if %ERRORLEVEL% NEQ 0 (
+    echo ... Baixando o modelo nomic-embed-text dentro do conteiner...
+    docker exec pgai-ollama-1 ollama pull nomic-embed-text
+) else (
+    echo + Modelo nomic-embed-text ja esta disponivel no conteiner
+)
+
+docker exec pgai-ollama-1 ollama list | findstr "deepseek-r1" > nul  
+if %ERRORLEVEL% NEQ 0 (
+    echo ... Baixando o modelo deepseek-r1 dentro do conteiner...
+    docker exec pgai-ollama-1 ollama pull deepseek-r1
+) else (
+    echo + Modelo deepseek-r1 ja esta disponivel no conteiner
+)
+
+echo ... Verificando conectividade entre conteineres...
+docker exec pgai-db-1 pg_isready -h localhost -p 5432 -U postgres
+if %ERRORLEVEL% NEQ 0 (
+    echo ! Conteiner PostgreSQL nao esta pronto. Esperando mais 10 segundos...
+    timeout /t 10 /nobreak > nul
+)
+
+echo ... Verificando se o conteiner Ollama esta respondendo...
+docker exec pgai-ollama-1 ollama list > nul
+if %ERRORLEVEL% NEQ 0 (
+    echo ! Conteiner Ollama nao esta respondendo. Esperando mais 10 segundos...
+    timeout /t 10 /nobreak > nul
+)
+
+echo ... Iniciando DocAI no modo RAG avancado...
+echo + Todas as pre-configuracoes concluidas, iniciando aplicacao...
+lein run --advanced
 goto END
 
 :END
