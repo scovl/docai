@@ -61,7 +61,7 @@
       (is (every? vector? result))
       (is (apply = (map count result)))  ; todos os vetores devem ter o mesmo tamanho
       (is (every? number? (flatten result)))))
-  
+
   (testing "Criação de embeddings com documentos inválidos"
     (let [docs [nil "texto" 123]
           result (emb/create-embeddings docs)]
@@ -85,8 +85,8 @@
       (is (= 2 (count result)))
       (is (= 0 (first result)))  ; o primeiro resultado deve ser o índice 0
       (is (= 1 (second result))))  ; o segundo resultado deve ser o índice 1
-    
+
     (testing "Busca com embeddings vazios"
       (is (= [0] (emb/similarity-search [] [[]] 1)))
       (is (= [] (emb/similarity-search [1] [] 1)))
-      (is (= [0 1] (emb/similarity-search [] [[] []] 3)))))) 
+      (is (= [0 1] (emb/similarity-search [] [[] []] 3))))))
