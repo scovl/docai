@@ -34,7 +34,7 @@
             cmd-compose (if (= container-cmd "podman") "podman-compose" "docker compose")
             script-cmd (if (= (System/getProperty "os.name") "Windows") "run.bat" "./run.sh")
             start-cmd (if (= container-cmd "podman") "podman-start" "docker-start")]
-        (println "❌ Erro: Não foi possível conectar ao PostgreSQL em" 
+        (println "❌ Erro: Não foi possível conectar ao PostgreSQL em"
                  (str (:host db-spec) ":" (:port db-spec)))
         (println "   Verifique se os containers estão em execução com '" cmd-compose " ps'")
         (println "   Você pode iniciar os containers com '" script-cmd " " start-cmd "'"))
@@ -117,7 +117,7 @@
           ;; Se não existir, criar o vectorizer
           (let [;; Tenta várias opções de hosts, com configuração mais completa
                 hosts ["http://pgai-ollama-1:11434" "http://ollama:11434" "http://172.18.0.2:11434" "http://host.docker.internal:11434" "http://localhost:11434"]
-                
+
                 ;; Função auxiliar para tentar um único host
                 try-host (fn [host]
                            (try
@@ -130,10 +130,10 @@
                                (jdbc/execute! conn [vectorizer-sql])
                                {:success true, :host host})
                              (catch Exception e
-                               {:success false, 
-                                :error (.getMessage e), 
+                               {:success false,
+                                :error (.getMessage e),
                                 :host host})))
-                
+
                 ;; Tenta cada host em sequência
                 result (loop [remaining-hosts hosts]
                          (if (empty? remaining-hosts)
@@ -150,7 +150,7 @@
                                  (recur (rest remaining-hosts)))))))]
             (if (:success result)
               true
-              (do 
+              (do
                 (println "❌ Falha em todas as tentativas de configurar o vectorizer")
                 false))))
         (catch Exception e
@@ -161,15 +161,16 @@
     false))
 
 (defn insert-document!
-  "Insere um documento no banco de dados"
+  "Insere um documento no PostgreSQL e retorna o ID"
   [titulo conteudo categoria]
-  (if (check-postgres-connection)
+  (when (check-postgres-connection)
     (let [conn (jdbc/get-connection db-spec)
           insert-sql "INSERT INTO documentos (titulo, conteudo, categoria) 
                       VALUES (?, ?, ?) 
                       RETURNING id"]
       (try
-        (let [result (jdbc/execute-one! conn [insert-sql titulo conteudo categoria]
+        (let [result (jdbc/execute-one! conn
+                                       [insert-sql titulo conteudo categoria]
                                        {:return-keys true
                                         :builder-fn rs/as-unqualified-maps})]
           (println "✅ Documento inserido com ID:" (:id result))
@@ -177,22 +178,24 @@
         (catch Exception e
           (println "❌ Erro ao inserir documento:" (.getMessage e))
           nil)
-        (finally
-          (.close conn))))
-    nil))
+        (finally (.close conn))))))
 
 (defn import-markdown-file!
   "Importa um arquivo markdown para o banco de dados"
   [filepath categoria]
   (try
-    (let [content (slurp filepath)
-          titulo (-> filepath
+    (let [;; Garante que filepath seja uma string
+          filepath-str (if (instance? java.io.File filepath)
+                         (.getPath ^java.io.File filepath)
+                         filepath)
+          content (slurp filepath-str)
+          titulo (-> filepath-str
                      (str/split #"/")
                      last
                      (str/replace #"\.md$" ""))
           id (insert-document! titulo content categoria)]
       (when id
-        (println "✅ Arquivo importado com sucesso:" filepath)))
+        (println "✅ Arquivo importado com sucesso:" filepath-str)))
     (catch Exception e
       (println "❌ Erro ao importar arquivo:" (.getMessage e)))))
 
@@ -220,12 +223,12 @@
                      ORDER BY distancia
                      LIMIT ?"
                 results (jdbc/execute! conn [search-sql-cached query limit]
-                                      {:builder-fn rs/as-unqualified-maps})]
+                                       {:builder-fn rs/as-unqualified-maps})]
             results)
           (catch Exception e
             (println "⚠️ Erro ao usar cache:" (.getMessage e))
             (println "🔄 Tentando abordagem alternativa sem cache...")
-            
+
             ;; Fallback para o método original se o cache falhar
             (let [search-sql "WITH query_embedding AS (
                        SELECT ai.ollama_embed('nomic-embed-text', ?) AS embedding
@@ -240,8 +243,8 @@
                      LEFT JOIN documentos d ON t.id = d.id
                      ORDER BY distancia
                      LIMIT ?"
-                results (jdbc/execute! conn [search-sql query limit]
-                                      {:builder-fn rs/as-unqualified-maps})]
+                  results (jdbc/execute! conn [search-sql query limit]
+                                         {:builder-fn rs/as-unqualified-maps})]
               results)))
         (catch Exception e
           (println "❌ Erro na busca semântica:" (.getMessage e))
@@ -313,4 +316,4 @@
         ;; Configurar cache de embeddings
         (setup-embedding-cache!)
         (create-vectorizer!)))
-    (println "⚠️ Avançando para modo de contingência sem PostgreSQL..."))) 
+    (println "⚠️ Avançando para modo de contingência sem PostgreSQL...")))
