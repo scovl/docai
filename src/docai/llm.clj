@@ -16,8 +16,8 @@
 (defn- api-error-message
   "Formata mensagem de erro da API"
   [response]
-  (str "Erro ao chamar a API do Ollama: " 
-       (:status response) " - " 
+  (str "Erro ao chamar a API do Ollama: "
+       (:status response) " - "
        (:body response)))
 
 (defn- truncate-context
@@ -58,10 +58,10 @@
         options {:headers {"Content-Type" "application/json"}
                  :body (json/write-str request-body)
                  :timeout 120000}  ;; Aumentar o timeout para 2 minutos
-        
+
         ;; Tentar com a URL principal
         result (try-single-url primary-url options)]
-    
+
     (if (:success result)
       (:result result)
       (do
@@ -100,7 +100,7 @@
       (println "DEBUG - Tamanho do prompt após truncamento:" (count prompt) "caracteres")
       (call-ollama-api prompt))
     (catch Exception e
-      (str "Erro ao gerar resposta: " (.getMessage e) 
-           "\n\nPor favor, verifique se o Ollama está em execução no endereço " 
+      (str "Erro ao gerar resposta: " (.getMessage e)
+           "\n\nPor favor, verifique se o Ollama está em execução no endereço "
            @ollama-base-url
-           "\n\nVocê pode iniciar o Ollama com o comando: ollama serve")))) 
+           "\n\nVocê pode iniciar o Ollama com o comando: ollama serve"))))
