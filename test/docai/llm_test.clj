@@ -61,4 +61,4 @@
           query "Pergunta com caracteres especiais: !@#$%^&*()"
           result (llm/generate-response query context)]
       (is (string? result))
-      (is (seq result))))) 
+      (is (seq result)))))
