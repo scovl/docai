@@ -67,9 +67,9 @@
 (deftest test-extract-text-with-invalid-file
   (testing "Extração de texto de arquivo inválido"
     (let [result (try
-                  (doc/extract-text "arquivo_que_nao_existe.md")
-                  (catch Exception e
-                    (.getMessage e)))]
+                   (doc/extract-text "arquivo_que_nao_existe.md")
+                   (catch Exception e
+                     (.getMessage e)))]
       (is (string? result))
       (is (.contains result "O sistema não pode encontrar o arquivo especificado")))))
 
@@ -101,4 +101,4 @@
       (is (= 2 (count result)))
       (is (every? string? result))
       (is (= "texto de exemplo" (first result)))
-      (is (= "mais texto" (second result)))))) 
+      (is (= "mais texto" (second result))))))
