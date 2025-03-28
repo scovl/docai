@@ -50,7 +50,7 @@
   (when chunks
     (->> chunks
          (filter (complement nil?))
-         (map (fn [chunk] 
+         (map (fn [chunk]
                 (when chunk
                   (-> chunk
                       (str/join " ")
@@ -68,20 +68,20 @@
       ;; Detectar código por extensão
       (contains? #{"py" "java" "js" "ts" "c" "cpp" "cs" "go" "rs" "php" "rb" "scala" "kt" "swift" "clj" "cljs" "cljc"} lower-ext)
       "code"
-      
+
       ;; Detectar documentos legais por conteúdo
       (or (str/includes? (str/lower-case content) "contrato")
           (str/includes? (str/lower-case content) "acordo")
           (str/includes? (str/lower-case content) "legal")
           (str/includes? (str/lower-case content) "lei"))
       "legal"
-      
+
       ;; Detectar documentos de Q&A por conteúdo
       (or (re-find #"(?i)(?:pergunta|p):.*?(?:resposta|r):.*" content)
           (re-find #"(?i)^Q:.*?A:.*" content)
           (re-find #"(?i)FAQ|perguntas\s+frequentes" content))
       "qa"
-      
+
       ;; Default para artigos
       :else "article")))
 
@@ -133,13 +133,13 @@
       (let [content (read-document file-path)
             document-type (detect-document-type file-path content)
             doc-id (str (java.util.UUID/randomUUID))]
-        
+
         (println "Processando arquivo" file-path "como documento tipo" document-type)
-        
+
         ;; Usar a função de processamento dinâmico de docai.advanced-rag
         (try
-          (let [chunks-count (adv-rag/process-document-with-dynamic-chunking! 
+          (let [chunks-count (adv-rag/process-document-with-dynamic-chunking!
                               doc-id content document-type)]
             (println "✅ Documento processado com" chunks-count "chunks."))
           (catch Exception e
-            (println "❌ Erro ao processar documento com chunking dinâmico:" (.getMessage e)))))))) 
+            (println "❌ Erro ao processar documento com chunking dinâmico:" (.getMessage e))))))))
