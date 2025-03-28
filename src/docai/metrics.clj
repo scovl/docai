@@ -49,13 +49,13 @@
     (let [conn (jdbc/get-connection pg/db-spec)]
       (try
         (jdbc/execute! conn
-                      ["INSERT INTO rag_logs 
+                       ["INSERT INTO rag_logs 
                         (query, retrieved_docs, response, latency_ms)
                         VALUES (?, ?, ?, ?)"
-                       query
-                       (json/write-str retrieved-docs)
-                       response
-                       latency])
+                        query
+                        (json/write-str retrieved-docs)
+                        response
+                        latency])
         (println "✅ Interação RAG registrada com sucesso")
         true
         (catch Exception e
@@ -79,15 +79,15 @@
       (try
         ;; Registrar feedback no banco de dados
         (jdbc/execute! conn
-                      ["INSERT INTO user_feedback 
+                       ["INSERT INTO user_feedback 
                         (query_id, feedback_type, feedback_text) 
                         VALUES (?, ?, ?)"
-                       query-id feedback-type feedback-text])
-        
+                        query-id feedback-type feedback-text])
+
         ;; Para feedback negativo, adicionar à fila de revisão
         (when (= feedback-type "negative")
           (println "⚠️ Feedback negativo registrado para análise"))
-        
+
         (println "✅ Feedback processado com sucesso")
         true
         (catch Exception e
@@ -98,48 +98,35 @@
     false))
 
 (defn calculate-rag-metrics
-  "Calcula métricas de desempenho para um período.
-   Documentada em rag02.md como parte essencial do sistema de monitoramento."
+  "Calcula métricas de desempenho para um período"
   [start-date end-date]
-  (if (pg/check-postgres-connection)
+  (when (pg/check-postgres-connection)
     (let [conn (jdbc/get-connection pg/db-spec)]
       (try
-        (let [;; Obter logs do período especificado
-              logs (jdbc/execute! 
-                    conn
-                    ["SELECT * FROM rag_logs 
-                      WHERE timestamp BETWEEN ? AND ?"
-                     start-date end-date])
-              
-              ;; Calcular métricas básicas
+        (let [logs (jdbc/execute! conn
+                                 ["SELECT * FROM rag_logs 
+                                  WHERE timestamp BETWEEN ? AND ?"
+                                  start-date end-date])
               count-logs (count logs)
               avg-latency (if (pos? count-logs)
                             (/ (reduce + (map :latency_ms logs)) count-logs)
                             0)
-              
-              ;; Calcular distribuição de latência percentil
               sorted-latencies (sort (map :latency_ms logs))
               p95-latency (if (pos? count-logs)
                             (nth sorted-latencies (int (* 0.95 count-logs)) 0)
                             0)
-              
-              ;; Resultados
               results {:total_queries count-logs
                        :avg_latency avg-latency
                        :p95_latency p95-latency}]
-          
           (println "📊 Métricas RAG calculadas:")
           (println "  Total de consultas: " count-logs)
           (println "  Latência média: " avg-latency "ms")
           (println "  Latência P95: " p95-latency "ms")
-          
           results)
         (catch Exception e
           (println "❌ Erro ao calcular métricas:" (.getMessage e))
           nil)
-        (finally
-          (.close conn))))
-    nil))
+        (finally (.close conn))))))
 
 ;; Função auxiliar para chamar LLM avaliador
 (defn call-evaluation-llm
@@ -157,19 +144,19 @@
   [query context response]
   (let [;; Construir prompt para avaliação de fidelidade
         prompt-faithfulness (str "Você é um avaliador especializado em sistemas RAG. "
-                              "Avalie a fidelidade da seguinte resposta ao contexto fornecido.\n\n"
-                              "Consulta: " query "\n\n"
-                              "Contexto: " (if (> (count context) 500) 
-                                          (str (subs context 0 500) "...") 
-                                          context) "\n\n"
-                              "Resposta: " response "\n\n"
-                              "A resposta contém informações que não estão no contexto? "
-                              "A resposta contradiz o contexto em algum ponto? "
-                              "Atribua uma pontuação de 1 a 10, onde 10 significa perfeita fidelidade ao contexto.")
-        
+                                 "Avalie a fidelidade da seguinte resposta ao contexto fornecido.\n\n"
+                                 "Consulta: " query "\n\n"
+                                 "Contexto: " (if (> (count context) 500)
+                                                (str (subs context 0 500) "...")
+                                                context) "\n\n"
+                                 "Resposta: " response "\n\n"
+                                 "A resposta contém informações que não estão no contexto? "
+                                 "A resposta contradiz o contexto em algum ponto? "
+                                 "Atribua uma pontuação de 1 a 10, onde 10 significa perfeita fidelidade ao contexto.")
+
         ;; Chamar LLM para avaliação
         faithfulness-result (call-evaluation-llm prompt-faithfulness)
-        
+
         ;; Extrair score numérico (implementação simplificada)
         score-pattern #"(\d+)(?:\.\d+)?"
         matches (re-find score-pattern faithfulness-result)
@@ -178,9 +165,9 @@
                   (Integer/parseInt (second matches))
                   (catch Exception _ 5))
                 5)]
-      
-      {:faithfulness score
-       :evaluation faithfulness-result}))
+
+    {:faithfulness score
+     :evaluation faithfulness-result}))
 
 ;; Adicionar uma função para coletar feedback de usuário via console
 (defn collect-user-feedback
@@ -200,10 +187,10 @@
         (let [feedback-text (read-line)
               ;; Padronizar tipos de feedback para o formato do banco
               db-feedback-type (case feedback-type
-                                "positivo" "positive"
-                                "negativo" "negative"
-                                "neutro" "neutral")]
+                                 "positivo" "positive"
+                                 "negativo" "negative"
+                                 "neutro" "neutral")]
           (if (process-user-feedback query-id db-feedback-type feedback-text)
             (println "✅ Feedback registrado com sucesso!")
             (println "❌ Não foi possível registrar o feedback."))))
-      (println "❌ Tipo de feedback inválido. Use 'positivo', 'negativo' ou 'neutro'.")))) 
+      (println "❌ Tipo de feedback inválido. Use 'positivo', 'negativo' ou 'neutro'."))))
